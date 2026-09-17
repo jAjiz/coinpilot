@@ -92,7 +92,9 @@ decision rather than an omission:
 
 - **Encryption.** §5.3 owns the cipher and the master key. This phase stores opaque bytes
   and never learns what they mean, which is what lets the storage be tested with no
-  master key anywhere near it. Phase 4 adds the cipher.
+  master key anywhere near it. Phase 4 adds the cipher, and what it must put inside the
+  ciphertext is already decided: `{"key": ..., "secret": ...}` encoded UTF-8, one payload
+  under one nonce.
 - **The credential tests of §12** — ciphertext differs from plaintext, no response schema
   carries a credential, no log line holds a secret. There is no cipher, no schema and no
   log here yet. What this phase can test, it does: the bytes go in and come back
@@ -690,6 +692,10 @@ class UserCredentials(TimestampMixin, Base):
     One ciphertext, not two, is deliberate. Two payloads under the same master key need
     two nonces, and a reused nonce breaks AES-GCM completely. One payload makes that
     mistake impossible rather than merely discouraged.
+
+    Inside the ciphertext is `{"key": ..., "secret": ...}` encoded UTF-8, per the spec's
+    §5.3. This table never sees that structure: it stores bytes and phase 4 owns the
+    cipher.
     """
 
     __tablename__ = "user_credentials"

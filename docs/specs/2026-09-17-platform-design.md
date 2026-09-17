@@ -192,6 +192,14 @@ database or the repository, with a per-record nonce and a key version field for
 rotation. They are decrypted only in the moment of calling Kraken, never logged, and
 never returned by any endpoint.
 
+**The key and the secret are one payload, not two.** They are serialised together as
+`{"key": ..., "secret": ...}`, encoded UTF-8, and encrypted once. Two ciphertexts under
+the same master key would need two nonces, and a nonce reused across them breaks AES-GCM
+completely: an attacker recovers the exclusive-or of both plaintexts and can forge
+further ciphertexts. One payload makes that mistake impossible to make rather than
+merely discouraged. The cost is that the two cannot be rotated separately, and nothing
+needs to — a Kraken key and its secret are issued and revoked as a pair.
+
 **What this does and does not protect.** Encryption at rest defends against a stolen
 database dump. It does not defend against a compromised server: a server that can trade
 on the user's behalf must be able to decrypt the key. The permission contract in §5.2 is
