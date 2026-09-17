@@ -182,7 +182,9 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      # 18+ mounts the parent, not data/: the image keeps a version-named subdirectory
+      # inside it so that pg_upgrade --link never crosses a mount boundary.
+      - pgdata:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U coinpilot"]
       interval: 5s

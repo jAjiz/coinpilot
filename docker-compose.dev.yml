@@ -1,0 +1,23 @@
+# A PostgreSQL for development and for the integration tests. It holds no production
+# data, so the credentials below are deliberately trivial and are not secret.
+services:
+  postgres:
+    image: postgres:18.6
+    environment:
+      POSTGRES_USER: coinpilot
+      POSTGRES_PASSWORD: coinpilot
+      POSTGRES_DB: coinpilot
+    ports:
+      - "5432:5432"
+    volumes:
+      # 18+ mounts the parent, not data/: the image keeps a version-named subdirectory
+      # inside it so that pg_upgrade --link never crosses a mount boundary.
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U coinpilot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:
