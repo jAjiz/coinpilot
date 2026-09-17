@@ -2822,7 +2822,6 @@ git commit -m "feat(db): the value series, evaluation records and retention"
 **Files:**
 - Create: `core/database.py`
 - Create: `tests/integration/test_tenant_isolation.py`
-- Create: `tests/unit/core/__init__.py`
 - Create: `tests/unit/core/test_layering.py`
 - Create: `tests/unit/core/test_config.py`
 
@@ -3095,7 +3094,9 @@ def test_removing_one_user_leaves_the_other_untouched(db_session: Session, alice
 
 - [ ] **Step 3: Write the unit tests that need no database**
 
-`tests/unit/core/__init__.py` is an empty file.
+> **`tests/unit/core/` must have no `__init__.py`.** With one, pytest names the package
+> after the directory and `core` shadows the real `core` package, so every import of
+> `core.config` fails. `tests/unit/engine/` has none either.
 
 `tests/unit/core/test_layering.py`:
 
