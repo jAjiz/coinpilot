@@ -29,8 +29,8 @@ and it executes.
 **Project 2 (later)** is the application: a mobile-consultable UI, configuration
 screens, notifications, and the decision about how the API is exposed to the internet.
 
-Project 1 has no user-facing interface beyond the REST API. Approving a sell during
-project 1 is an API call.
+Project 1 has no user-facing interface beyond the REST API. Approving a rebalance
+during project 1 is an API call.
 
 ## 3. Product rules
 
@@ -66,16 +66,23 @@ A row with a target of **0 %** is a different statement: it means *exit this pos
 and the engine will propose selling it. Two intentions, distinguished by the presence of
 the row, with no extra field.
 
-### 3.4 Buys execute, sells are approved
+### 3.4 What needs approval
 
-**Buys funded by available cash execute autonomously.** The worst outcome of a bug on
-that path is a bad price on money the user already deposited.
+The unit of approval is the **operation**, not the individual order.
 
-**Every sell requires explicit approval.** The worst outcome of a bug on that path is a
-destroyed position, which cannot be undone.
+| Operation | Approval |
+|---|---|
+| Invest cash | never |
+| One-off rebalance | always |
+| Automatic rebalance | none; enabling it is the authorisation |
 
-This holds for automatic rebalancing too: automation applies to **detection**, never to
-the execution of a sell.
+Investing cash only ever spends fiat the user already deposited, so the worst outcome of
+a bug on that path is a bad price. A rebalance sells, and the worst outcome there is a
+destroyed position, which cannot be undone. That is why it sits behind an explicit
+decision, taken per operation or once, by enabling automatic rebalancing.
+
+An operation is atomic for approval. A rebalance is approved or executed whole, including
+any cash-funded buys it contains.
 
 ### 3.5 Cadence
 
@@ -86,6 +93,7 @@ Two independent cadences per user, with the same shape:
 | `cadence_mode` | `MIN` or `INTERVAL` |
 | `interval_days` | used when mode is `INTERVAL` |
 | `interval_months` | used when mode is `INTERVAL`; calendar months, not 30 days |
+| `cadence_anchor` | start date and time; used when mode is `INTERVAL` |
 
 - `invest_cadence` — how often cash is invested.
 - `rebalance_cadence` — how often drift is checked.
@@ -96,9 +104,15 @@ there is drift. It is deliberately **not** "every tick" — the on-demand refres
 (§10.4) already solves screen freshness, and nothing in this product needs to act inside
 60 seconds.
 
+`cadence_anchor` is what lets a user say "the 1st of every month" or "every quarter
+from 15 January". Occurrences are `anchor + k x interval`. Below a day the anchor
+carries no meaning and is ignored; §10.2 covers how it coexists with staggering.
+
 **Cadence says when to look. `min_drift_pct` says whether to act.**
 
-If both cadences fall due on the same tick, there is one balance read and one plan.
+If both cadences fall due on the same tick, there is one balance read and two
+operations: the invest operation executes, and the rebalance operation is proposed or
+executed according to the switch.
 
 ## 4. Architecture
 
@@ -109,28 +123,32 @@ If both cadences fall due on the same tick, there is one balance read and one pl
 | `platform` | FastAPI + APScheduler: engine, REST API and scheduler in one process |
 | `postgres` | All state |
 
-Two containers, against BoTCoin's four. There is no Telegram service and no Grafana: the
-project 2 application replaces both.
+Two containers. There is no messaging service and no dashboard service; the project 2
+application replaces both.
 
-### 4.2 Carried over from BoTCoin
+**Language and stack: Python**, with FastAPI, SQLAlchemy, Alembic and APScheduler. This is
+a decision with reasons behind it, not a default — see §14.
 
-- `exchange/kraken.py` — `_safe_call`, `OrderStatus`, `map_order_status`,
-  `new_cl_ord_id`, `find_order_by_cl_ord_id`, and the rounding boundary.
-  **Changed:** the module-level 1 call/sec lock becomes a **per-key** rate limiter, and
-  the single client becomes a client per user (§10.3).
-- `core/` — `logging.py`, `utils.py`, the database facade over `core/db/`, the
-  `config_store` pattern, and the scheduler skeleton with its session telemetry and
-  edge-triggered failure streaks.
-- `api/` — scaffolding and request validation.
-- Dockerfile, compose files, Alembic, the CI workflow, and the testing conventions.
+### 4.2 Layers
 
-`core/runtime.py`'s module-level globals become **per-user** state.
+- `exchange/kraken.py` — the anti-corruption boundary for Kraken's vocabulary:
+  `_safe_call`, a normalised `OrderStatus` with its translator, `new_cl_ord_id`,
+  `find_order_by_cl_ord_id`, and the rounding boundary where prices and volumes meet each
+  pair's precision. Rate limiting is **per key** and the client is **per user** (§10.3).
+- `core/` — logging, rounding helpers, a database facade over `core/db/` split by domain,
+  a DB-authoritative configuration store seeded once from the environment, and the
+  scheduler with its session telemetry and edge-triggered failure streaks.
+- `api/` — FastAPI routing and request validation.
+- Dockerfile, compose files, Alembic migrations, the CI workflow and the testing
+  conventions.
 
-### 4.3 Not carried over
+Shared runtime state is held **per user**. No module-level global holds user state.
 
-All of `trading/` except the arithmetic of `inventory_manager.py`. No ATR, no volatility
-classification, no calibration, no optimizer, no backtest, no simulation engine, and no
-`positions_manager`. There is no trading strategy in this system.
+### 4.3 What this system does not contain
+
+No volatility modelling, no parameter calibration, no optimizer, no backtest and no
+simulation engine. There is no trading strategy here: the system never decides *what* to
+hold, only how to reach what the user declared.
 
 ## 5. Identity and credentials
 
@@ -196,9 +214,9 @@ Every table carries `user_id`. There are no singleton rows.
 
 Settings types: `min_drift_pct` is `Numeric(4,1)`, `min_order_fiat` is `Numeric(10,1)`.
 
-`portfolio_snapshots` exists from day one. Its absence is exactly what left BoTCoin
-unable to answer whether it was beating a simple hold, and it is the series the project 2
-application will chart.
+`portfolio_snapshots` exists from day one. Without it there is no way to answer how the
+portfolio has performed over time, and the series cannot be reconstructed afterwards. It is
+also what the project 2 application will chart.
 
 `sessions` records **evaluations**, not system ticks. A monthly user produces twelve rows
 a year, not thirty-five thousand. A retention policy is part of the initial schema, not a
@@ -213,8 +231,9 @@ reconcile(holdings, prices, targets, cash, policy) -> Plan
 ```
 
 A pure leaf module. It imports no configuration and reads no globals; everything arrives
-as arguments. This is BoTCoin's `trading/engine.py` lesson: that module could serve the
-live bot, the backtest and the optimizer precisely because it had no ambient state.
+as arguments. A module with no ambient state can be driven by any caller and tested
+exhaustively without mocks, which is why the most critical code in the system is also the
+cheapest to verify.
 
 The policy carries `allow_sells`, the cash policy (`PRORATA` or `REDUCE_DRIFT`),
 `min_drift_pct` and `min_order_fiat`. The four described behaviours are four policies,
@@ -227,21 +246,18 @@ not four code paths:
 | One-off rebalance | `allow_sells=true`, user-triggered |
 | Automatic rebalance | `allow_sells=true`, cadence-triggered |
 
-### 7.2 The plan has two parts
+### 7.2 An operation is atomic
 
 In a full rebalance, **sells fund buys**. A portfolio at 70/30 with a 50/50 target and no
-cash must sell before it can buy. If the buy executed autonomously while the sell waited
-for approval, the buy would have no money.
+cash must sell before it can buy.
 
-So a plan is split by funding source:
+The plan of a rebalance is therefore executed as a unit — sells first, then buys with the
+proceeds — and approval applies to that unit. Approving order by order would leave an
+operation half executed, with a buy waiting on a decision for money that has already been
+raised.
 
-| Part | Funded by | Execution |
-|---|---|---|
-| Autonomous | cash already available | immediately, no approval |
-| Proposed | proceeds of the sells | after approval: sells first, then buys |
-
-This preserves the rule in §3.4 without breaking the arithmetic: what executes on its own
-still spends only money the user already has.
+An invest operation contains only cash-funded buys, so it carries no such ordering
+constraint and always executes on arrival.
 
 ### 7.3 Filters
 
@@ -251,6 +267,10 @@ produces no leg. With `min_drift_pct` at 0, `min_order_fiat` is the effective fl
 ## 8. The proposal lifecycle
 
 At most one live proposal per user, recalculated at every evaluation.
+
+A proposal always represents a **rebalance operation**. Invest operations never produce
+one, and neither does a rebalance while automatic rebalancing is enabled: that executes
+directly.
 
 **The version increments only on a material change**: a leg appears or disappears, or a
 leg's amount moves by more than `min_order_fiat`. That threshold is reused deliberately —
@@ -269,9 +289,10 @@ Orders are market orders. They execute on arrival, so **no order rests on the bo
 between ticks**. There is no repricing, no partial-fill reconciliation, no cancel
 penalty, and no order state machine.
 
-This is affordable because the system has **no latency budget**. BoTCoin's chase
-machinery existed because a fired stop leaves a position exposed while its order rests;
-a monthly contribution can be invested today or tomorrow. The cost is the taker fee
+This is affordable because the system has **no latency budget**. Chasing a limit order
+across ticks earns its complexity only when a position is exposed while the order rests.
+Nothing here is exposed: a contribution can be invested this hour or the next, and so can a
+drifted weight be corrected. The cost is the taker fee
 against the maker fee: 0.40 % against 0.25 %, so 0.15 percentage points of every amount
 traded.
 
@@ -341,6 +362,13 @@ Uniform by construction, and deterministic, so an incident can be reproduced. It
 prevents the failure it is there for: an offset anchored to the clock would put every
 monthly user in the same minute of the month.
 
+**An interval of a day or more honours the anchor.** The anchor fixes the date; the hash
+offset then spreads users inside a bounded window after the anchor's time, one hour by
+default. "The 1st at 09:00" runs between 09:00 and 10:00, at the same point every time for
+the same user. Intent is honoured to the hour, and a thousand monthly users spread over
+3 600 seconds instead of landing in one minute. Below a day there is no anchor, and the
+offset spreads across the whole interval.
+
 A missed run — the system was down — recomputes **forward** to the next slot. One
 evaluation, never three accumulated.
 
@@ -384,9 +412,9 @@ freshness from the scheduler's cadence.
 
 ### 10.5 Failure isolation
 
-One user's failure is recorded and skipped; the rest of the tick proceeds. This is
-BoTCoin's per-pair pattern applied per user, and the edge-triggered alert streaks come
-across with it: one message per episode, not per failure.
+One user's failure is recorded and skipped; the rest of the tick proceeds. Alerting is
+edge-triggered on a per-user failure streak: one message when the streak crosses the
+threshold and one when it recovers, never one per failure.
 
 ## 11. API surface
 
@@ -406,20 +434,22 @@ Every endpoint is scoped to the authenticated user. No endpoint returns a creden
 
 ## 12. Testing
 
-BoTCoin's conventions carry over: `tests/unit/` with no external calls, `tests/integration/`
-behind `RUN_DB_INTEGRATION`, `pytest-asyncio` for routes, and an 80 % coverage gate.
+Conventions: `tests/unit/` with no external calls, `tests/integration/` behind
+`RUN_DB_INTEGRATION`, `pytest-asyncio` for routes, and an 80 % coverage gate.
 
 Five additions specific to this system:
 
 - **The engine is table-driven.** Given holdings, prices, targets and a policy, expect
   this exact plan. No mocks at all. The most critical code in the system is also the
   easiest to test, which is the point of making it a pure leaf module.
-- **No test reads configuration from the environment.** This rule is paid for: six
-  `test_backtest.py` tests passed on the developer's machine and died in CI because they
-  read `STOP_PERCENTILES` from a local `.env`. Every test states what it needs, and CI
-  runs without a `.env` precisely to catch the one that does not.
+- **No test reads configuration from the environment.** A test that reads ambient
+  settings passes on a developer machine holding a local `.env` and fails in CI, which has
+  none — and it fails as a mystery, because the code under test is correct. Every test
+  states what it needs explicitly, and CI runs without a `.env` precisely to catch the one
+  that does not.
 - **Tenant isolation is its own test category.** User A seeing or acting on user B's data
-  is a class of bug BoTCoin could not have. Every DAL function and every endpoint needs a
+  is a class of bug that appears only once a system is multi-tenant. Every DAL function
+  and every endpoint needs a
   scoping test.
 - **Credential handling is tested.** Ciphertext differs from plaintext; no response schema
   carries a credential field; no log line contains a secret.
@@ -449,16 +479,29 @@ Non-obvious decisions a reviewer would otherwise question.
 
 - **Market orders, not limit orders with a chase.** The system has no latency budget, and
   the chase machinery existed entirely to serve one. Dropping it removes the largest
-  source of complexity and production failures in the predecessor, for 0.15 points of fee.
+  source of complexity and of failure modes in this class of system, for 0.15 points of
+  fee.
 - **`cl_ord_id` survives anyway.** It solves the lost response, which is independent of
-  order type. Its role is much smaller than in BoTCoin — a safety net for a rare path, not
-  a central mechanism.
+  order type. It is a safety net for a rare path, not a central mechanism.
 - **Cash is the remainder of the weights, not a separate reserve.** One model, one
   denominator, and cash drift is measured like any other.
 - **A configured asset at 0 % means "exit"; an unconfigured asset means "not mine to
   touch".** Two intentions distinguished by row presence, with no extra field.
-- **The plan is split by funding source.** Sells fund buys, so a buy that depends on a
-  pending approval cannot execute autonomously without breaking the arithmetic.
+- **Approval is granted per operation, not per order.** Inside a rebalance, sells fund
+  buys, so approving order by order would leave an operation half executed. Investing cash
+  needs no approval because it only ever spends fiat already deposited; a rebalance does,
+  unless the user authorised it once by enabling automatic rebalancing.
+- **Python, decided rather than assumed.** The workload is I/O bound — HTTP to Kraken and
+  queries to Postgres — with almost no computation, so language throughput is not a
+  differentiator; the bottleneck is network latency and the host. Node would hold a smaller
+  resident footprint and would pay off if the project 2 application were TypeScript,
+  sharing one API contract across both. It loses on the point that decides here: the
+  exchange layer already exists in Python, and its value is concentrated in the subtle
+  parts — status normalisation, lost-response resolution, per-key rate limiting.
+  Re-deriving those in another language means learning them a second time.
+- **An interval cadence carries an anchor, and the stagger runs inside a window.** Left to
+  themselves, users all choose the 1st at 09:00, so a pure anchor clusters and a pure hash
+  ignores intent. The anchor fixes the date and the hash spreads the hour.
 - **The proposal version tracks material change only, measured in `min_order_fiat`.**
   A version that bumped on every recalculation would make approval impossible, and a
   separate tolerance would be one more knob.
@@ -471,8 +514,7 @@ Non-obvious decisions a reviewer would otherwise question.
   the user who is looking, which decouples screen freshness from scheduler cadence and
   removes the only good reason to tick fast.
 - **Per-key rate limiting, not a module-level lock.** Kraken counts per key, so different
-  users do not contend. The inherited global lock would cap the system at one user per
-  second.
+  users do not contend. A single global lock would cap the system at one user per second.
 - **OAuth instead of local passwords.** The platform already custodies API keys; adding
   password custody, reset and verification flows would enlarge the blast radius for no
   product gain.
