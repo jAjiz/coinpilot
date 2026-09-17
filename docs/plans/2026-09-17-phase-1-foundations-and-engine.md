@@ -1194,3 +1194,20 @@ running:
    ```
    Expected: no output. That property is what keeps this code testable without mocks, and
    it is easy to lose by accident in a later phase.
+
+---
+
+## Departures taken during execution
+
+The code blocks above are the plan as written. Three of them do not match what was
+committed, and the difference is deliberate in each case. Trust the repository, not this
+document, where the two disagree.
+
+| Where | The plan said | What was committed | Why |
+|---|---|---|---|
+| `engine/types.py` | `class Side(str, Enum)` | `class Side(StrEnum)` | Rule `UP042` forbids the pair on Python 3.12. `StrEnum` also makes `str(Side.BUY)` return `"buy"`, which later serialisation needs. |
+| `tests/unit/engine/test_reconcile.py` | `min_drift_pct: Decimal = D("0")` | `min_drift_pct: Decimal = ZERO` | Rule `B008` forbids a call in an argument default. `engine.types.ZERO` already exists for this. |
+| `pyproject.toml` | no `extend-exclude` | `extend-exclude = ["docs"]` | Ruff 0.16 formats Python blocks inside Markdown, and wanted to rewrite this document. The formatter governs source code, not written records. |
+
+Two code blocks were also joined onto one line by `ruff format`, which applies the
+configured line length of 110 rather than the 88 the plan was typed at.
