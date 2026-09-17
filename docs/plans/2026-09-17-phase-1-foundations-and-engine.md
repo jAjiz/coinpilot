@@ -11,7 +11,7 @@ as an argument and every output is a frozen value object. That is what lets it b
 exhaustively with no mocks, and what will later let the same code serve the scheduler, a
 manual endpoint and any future caller unchanged.
 
-**Tech Stack:** Python 3.12, pytest, pytest-cov, ruff. No database, no HTTP, no
+**Tech Stack:** Python 3.13, pytest, pytest-cov, ruff. No database, no HTTP, no
 framework in this phase.
 
 **Spec:** [`docs/specs/2026-09-17-platform-design.md`](../specs/2026-09-17-platform-design.md) — §3.1, §3.2, §3.3, §7.1, §7.3
@@ -20,7 +20,8 @@ framework in this phase.
 
 ## Global Constraints
 
-- **Python 3.12.** `requires-python = ">=3.12"`.
+- **Python 3.13.** `requires-python = ">=3.13"`. One version, not a range: see the
+  spec's §14 "One Python version, not a supported range".
 - **Money is `Decimal`, never `float`.** Every amount, price, weight and percentage in the
   engine is `decimal.Decimal`. A `float` in a monetary path is a defect.
 - **Pin every dependency with `==`.** Resolve the exact version before adding one.
@@ -79,11 +80,11 @@ reconcile is the only module that knows about all three.
 name = "coinpilot"
 version = "0.1.0"
 description = "Multi-tenant portfolio rebalancer for Kraken"
-requires-python = ">=3.12"
+requires-python = ">=3.13"
 
 [tool.ruff]
 line-length = 110
-target-version = "py312"
+target-version = "py313"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
@@ -183,7 +184,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6.0.0
         with:
-          python-version: "3.12"
+          python-version: "3.13"
 
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
@@ -1205,9 +1206,13 @@ document, where the two disagree.
 
 | Where | The plan said | What was committed | Why |
 |---|---|---|---|
-| `engine/types.py` | `class Side(str, Enum)` | `class Side(StrEnum)` | Rule `UP042` forbids the pair on Python 3.12. `StrEnum` also makes `str(Side.BUY)` return `"buy"`, which later serialisation needs. |
+| `engine/types.py` | `class Side(str, Enum)` | `class Side(StrEnum)` | Rule `UP042` forbids the pair on Python 3.12 and later. `StrEnum` also makes `str(Side.BUY)` return `"buy"`, which later serialisation needs. |
 | `tests/unit/engine/test_reconcile.py` | `min_drift_pct: Decimal = D("0")` | `min_drift_pct: Decimal = ZERO` | Rule `B008` forbids a call in an argument default. `engine.types.ZERO` already exists for this. |
 | `pyproject.toml` | no `extend-exclude` | `extend-exclude = ["docs"]` | Ruff 0.16 formats Python blocks inside Markdown, and wanted to rewrite this document. The formatter governs source code, not written records. |
+
+The Python version moved from 3.12 to 3.13 after the phase was merged. The blocks above
+carry 3.13 so that a later phase inherits the right constraint; 3.12 is what actually ran
+during execution, and CI was green on both.
 
 Two code blocks were also joined onto one line by `ruff format`, which applies the
 configured line length of 110 rather than the 88 the plan was typed at.
