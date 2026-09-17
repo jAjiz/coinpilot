@@ -1,4 +1,4 @@
-# StackRebalancer — Platform Design
+# CoinPilot — Platform Design
 
 **Date:** 2026-09-17 · **Status:** approved, not yet implemented · **Scope:** Project 1 of 2
 
