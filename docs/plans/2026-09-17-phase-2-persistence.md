@@ -1008,6 +1008,36 @@ that the database really carries it.
 Open the generated file and confirm it creates eight tables. If it is empty, `env.py` did
 not import `Base` — re-read step 5.
 
+**Then fix the template, not just the file.** `alembic init` writes
+`scripts/migrations/script.py.mako` with `from typing import Sequence, Union` and
+`Union[str, None]` annotations, which rules `UP035` and `UP007` reject on Python 3.13.
+Left alone, every future migration reproduces them. Replace that header with:
+
+```mako
+"""
+
+from collections.abc import Sequence
+
+import sqlalchemy as sa
+from alembic import op
+${imports if imports else ""}
+
+# revision identifiers, used by Alembic.
+revision: str = ${repr(up_revision)}
+down_revision: str | Sequence[str] | None = ${repr(down_revision)}
+branch_labels: str | Sequence[str] | None = ${repr(branch_labels)}
+depends_on: str | Sequence[str] | None = ${repr(depends_on)}
+```
+
+Then tidy the file that was generated before the fix:
+
+```bash
+ruff check . --fix && ruff format .
+```
+
+Run that pair after every `alembic revision` from now on. Autogenerate lays out its
+output to its own taste, not to this project's line length.
+
 - [ ] **Step 7: Apply it, reverse it and apply it again**
 
 ```bash

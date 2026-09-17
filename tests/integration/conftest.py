@@ -11,12 +11,29 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
+from alembic import command
+from alembic.config import Config
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 
 from core.db.session import create_engine_from_url
+
+_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _migrate(url: str) -> None:
+    """Bring the test database to head.
+
+    Running the real migrations rather than `create_all` means every test run also proves
+    the migrations still apply.
+    """
+    cfg = Config(str(_ROOT / "alembic.ini"))
+    cfg.set_main_option("script_location", str(_ROOT / "scripts" / "migrations"))
+    cfg.set_main_option("sqlalchemy.url", url.replace("%", "%%"))
+    command.upgrade(cfg, "head")
 
 
 def _enabled() -> bool:
@@ -31,6 +48,7 @@ def engine() -> Iterator[Engine]:
     if not url:
         pytest.skip("DATABASE_URL is not set")
     built = create_engine_from_url(url)
+    _migrate(url)
     yield built
     built.dispose()
 
