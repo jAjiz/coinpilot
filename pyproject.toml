@@ -16,14 +16,16 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 [tool.pytest.ini_options]
 minversion = "9.0"
 testpaths = ["tests"]
-addopts = "-ra --strict-markers --cov --cov-report=term-missing --cov-fail-under=80"
+# The coverage gate lives in the CI command, not here. With core/db measured, anyone
+# running only tests/unit would otherwise fail on code they deliberately skipped.
+addopts = "-ra --strict-markers --cov --cov-report=term-missing"
 markers = [
     "unit: Unit tests with no network and no database.",
-    "integration: Tests that may touch external services.",
+    "integration: Tests that need a real PostgreSQL.",
 ]
 
 [tool.coverage.run]
-source = ["engine"]
+source = ["engine", "core"]
 
 [tool.coverage.report]
 show_missing = true

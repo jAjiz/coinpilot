@@ -182,7 +182,9 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      # 18+ mounts the parent, not data/: the image keeps a version-named subdirectory
+      # inside it so that pg_upgrade --link never crosses a mount boundary.
+      - pgdata:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U coinpilot"]
       interval: 5s
@@ -1005,6 +1007,36 @@ that the database really carries it.
 
 Open the generated file and confirm it creates eight tables. If it is empty, `env.py` did
 not import `Base` — re-read step 5.
+
+**Then fix the template, not just the file.** `alembic init` writes
+`scripts/migrations/script.py.mako` with `from typing import Sequence, Union` and
+`Union[str, None]` annotations, which rules `UP035` and `UP007` reject on Python 3.13.
+Left alone, every future migration reproduces them. Replace that header with:
+
+```mako
+"""
+
+from collections.abc import Sequence
+
+import sqlalchemy as sa
+from alembic import op
+${imports if imports else ""}
+
+# revision identifiers, used by Alembic.
+revision: str = ${repr(up_revision)}
+down_revision: str | Sequence[str] | None = ${repr(down_revision)}
+branch_labels: str | Sequence[str] | None = ${repr(branch_labels)}
+depends_on: str | Sequence[str] | None = ${repr(depends_on)}
+```
+
+Then tidy the file that was generated before the fix:
+
+```bash
+ruff check . --fix && ruff format .
+```
+
+Run that pair after every `alembic revision` from now on. Autogenerate lays out its
+output to its own taste, not to this project's line length.
 
 - [ ] **Step 7: Apply it, reverse it and apply it again**
 
@@ -2790,7 +2822,6 @@ git commit -m "feat(db): the value series, evaluation records and retention"
 **Files:**
 - Create: `core/database.py`
 - Create: `tests/integration/test_tenant_isolation.py`
-- Create: `tests/unit/core/__init__.py`
 - Create: `tests/unit/core/test_layering.py`
 - Create: `tests/unit/core/test_config.py`
 
@@ -3063,7 +3094,9 @@ def test_removing_one_user_leaves_the_other_untouched(db_session: Session, alice
 
 - [ ] **Step 3: Write the unit tests that need no database**
 
-`tests/unit/core/__init__.py` is an empty file.
+> **`tests/unit/core/` must have no `__init__.py`.** With one, pytest names the package
+> after the directory and `core` shadows the real `core` package, so every import of
+> `core.config` fails. `tests/unit/engine/` has none either.
 
 `tests/unit/core/test_layering.py`:
 
