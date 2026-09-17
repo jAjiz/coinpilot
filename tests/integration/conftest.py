@@ -10,7 +10,8 @@ says where the test runs, not what the code under test is given.
 from __future__ import annotations
 
 import os
-from collections.abc import Iterator
+import uuid
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
@@ -19,7 +20,9 @@ from alembic.config import Config
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 
+from core.db.models import User
 from core.db.session import create_engine_from_url
+from core.db.users import create_user
 
 _ROOT = Path(__file__).resolve().parents[2]
 
@@ -68,3 +71,17 @@ def db_session(engine: Engine) -> Iterator[Session]:
         session.close()
         transaction.rollback()
         connection.close()
+
+
+@pytest.fixture
+def make_user(db_session: Session) -> Callable[..., User]:
+    """Create a user with an identity nothing else will collide with.
+
+    Every later test file builds its rows on top of this, because every table in the
+    system needs a user before it can hold anything.
+    """
+
+    def _make(email: str = "someone@example.test") -> User:
+        return create_user(db_session, provider="google", subject=str(uuid.uuid4()), email=email)
+
+    return _make
