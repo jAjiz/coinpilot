@@ -1,0 +1,29 @@
+[project]
+name = "stack-rebalancer"
+version = "0.1.0"
+description = "Multi-tenant portfolio rebalancer for Kraken"
+requires-python = ">=3.12"
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+# Documents hold illustrative code and are a record; the formatter governs source only.
+extend-exclude = ["docs"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+minversion = "9.0"
+testpaths = ["tests"]
+addopts = "-ra --strict-markers --cov --cov-report=term-missing --cov-fail-under=80"
+markers = [
+    "unit: Unit tests with no network and no database.",
+    "integration: Tests that may touch external services.",
+]
+
+[tool.coverage.run]
+source = ["engine"]
+
+[tool.coverage.report]
+show_missing = true
