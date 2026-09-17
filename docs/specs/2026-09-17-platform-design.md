@@ -126,8 +126,8 @@ executed according to the switch.
 Two containers. There is no messaging service and no dashboard service; the project 2
 application replaces both.
 
-**Language and stack: Python**, with FastAPI, SQLAlchemy, Alembic and APScheduler. This is
-a decision with reasons behind it, not a default — see §14.
+**Language and stack: Python 3.13**, with FastAPI, SQLAlchemy, Alembic and APScheduler.
+This is a decision with reasons behind it, not a default — see §14.
 
 ### 4.2 Layers
 
@@ -499,6 +499,11 @@ Non-obvious decisions a reviewer would otherwise question.
   exchange layer already exists in Python, and its value is concentrated in the subtle
   parts — status normalisation, lost-response resolution, per-key rate limiting.
   Re-deriving those in another language means learning them a second time.
+- **One Python version, not a supported range.** `requires-python` declares a floor that
+  a library's consumers depend on. This is an application: nobody installs it on their own
+  interpreter, and the production image pins whatever version we choose. A range would
+  oblige CI to prove it with a matrix, so the venv, CI and the production image all state
+  the same single version, and raising it is one deliberate change in three places.
 - **An interval cadence carries an anchor, and the stagger runs inside a window.** Left to
   themselves, users all choose the 1st at 09:00, so a pure anchor clusters and a pure hash
   ignores intent. The anchor fixes the date and the hash spreads the hour.
