@@ -21,7 +21,7 @@ lacks withdrawal permission**, so a compromise bounds to "someone can trade" rat
 ## Design
 
 The full design is in
-[`docs/superpowers/specs/2026-09-17-platform-design.md`](docs/superpowers/specs/2026-09-17-platform-design.md).
+[`docs/specs/2026-09-17-platform-design.md`](docs/specs/2026-09-17-platform-design.md).
 Two sections are worth reading before the rest:
 
 - **§14 Design choices** — the decisions a reviewer would otherwise question, each with
