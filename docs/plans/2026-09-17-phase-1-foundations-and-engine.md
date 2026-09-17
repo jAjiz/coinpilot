@@ -76,7 +76,7 @@ reconcile is the only module that knows about all three.
 
 ```toml
 [project]
-name = "stack-rebalancer"
+name = "coinpilot"
 version = "0.1.0"
 description = "Multi-tenant portfolio rebalancer for Kraken"
 requires-python = ">=3.12"

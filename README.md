@@ -1,4 +1,4 @@
-# StackRebalancer
+# CoinPilot
 
 > **Status: design approved, implementation not started.**
 
