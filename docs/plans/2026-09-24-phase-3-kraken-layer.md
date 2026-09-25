@@ -2286,3 +2286,20 @@ it writes a log line, and a test forces an exception carrying the secret to prov
 is registering their key, the key is refused and they try again. The alternative — storing
 it and validating later — means the system briefly holds a key it has not checked, which
 is the one outcome the whole contract exists to prevent.
+
+---
+
+## Departures taken during execution
+
+The code blocks above are the plan as written. Where the repository differs, trust the
+repository.
+
+| Where | What changed | Why |
+|---|---|---|
+| `requirements.txt` | `psycopg[binary]==3.3.6`, not 3.3.5 | Dependabot moved it after the plan was written. |
+| `tests/unit/exchange/test_signing.py` | `# noqa: E501  # gitleaks:allow` on the vector secret | gitleaks blocked the commit: Kraken's published example has the entropy of a real key. It is public, and the exception is scoped to that one line. |
+| `tests/unit/exchange/test_client.py` | A fake secret of base64 `this-is-a-test-secret`, marked `# gitleaks:allow` | Same scanner, same reason. |
+| `tests/unit/exchange/test_client.py` | The redaction test also asserts `"connection failed" in written` | Without it the test passes on an empty log, which contains no key either. This assertion is what exposed the next row. |
+| `scripts/migrations/env.py` | `fileConfig(..., disable_existing_loggers=False)` | The standard library's default disables every logger that already exists. The migrations ran after `coinpilot.exchange` was created and silenced it. In production, running migrations in-process would have muted every failed-call warning. |
+| `tests/integration/test_schema.py` | A test that runs the migrations and asserts the logger stays on | Pins the previous row without depending on the order the suite runs in. The suite total is 210, not 209. |
+| `tests/unit/exchange/test_keys.py` | `REQUIRED_PERMISSIONS.isdisjoint(FORBIDDEN_PERMISSIONS)` | Rule `SIM300` misreads the comparison with `frozenset()`, and `isdisjoint` says what the test means. |
