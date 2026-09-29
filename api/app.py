@@ -7,7 +7,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from api.context import AppContext
-from api.routes import assets, auth, config, credentials, health
+from api.routes import assets, auth, config, credentials, health, history, portfolio
 
 
 async def _validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
@@ -27,6 +27,14 @@ def create_app(context: AppContext) -> FastAPI:
     app = FastAPI(title="CoinPilot", version="0.1.0")
     app.state.context = context
     app.add_exception_handler(RequestValidationError, _validation_error)
-    for router in (health.router, auth.router, credentials.router, config.router, assets.router):
+    for router in (
+        health.router,
+        auth.router,
+        credentials.router,
+        config.router,
+        assets.router,
+        portfolio.router,
+        history.router,
+    ):
         app.include_router(router)
     return app

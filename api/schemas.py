@@ -146,3 +146,40 @@ class AssetOut(BaseModel):
 class AssetsOut(BaseModel):
     assets: list[AssetOut]
     cash_target_pct: Decimal
+
+
+class PortfolioOut(BaseModel):
+    as_of: datetime
+    fiat: str
+    # Managed assets plus cash: the denominator of every weight. Plain decimal strings,
+    # written like the amounts inside `holdings`.
+    total_value: str
+    cash: str
+    holdings: dict[str, object]
+
+
+class OrderOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    cl_ord_id: str
+    txid: str | None
+    pair: str
+    asset: str
+    side: str
+    reason: str
+    status: str
+    requested_fiat: Decimal
+    executed_volume: Decimal | None
+    executed_price: Decimal | None
+    fee: Decimal | None
+    created_at: datetime
+
+
+class EvaluationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    started_at: datetime
+    finished_at: datetime | None
+    duration_ms: int | None
+    status: str
+    log_messages: str | None
