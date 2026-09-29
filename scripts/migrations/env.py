@@ -23,8 +23,11 @@ config = context.config
 if not config.get_main_option("sqlalchemy.url", ""):
     config.set_main_option("sqlalchemy.url", database_url().replace("%", "%%"))
 
+# `fileConfig` disables every logger that already exists unless told not to. Run
+# in-process after the application's loggers are created, the default would silence them
+# all, including the one that reports every failed Kraken call.
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 

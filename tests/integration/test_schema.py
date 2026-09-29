@@ -1,5 +1,10 @@
+import logging
+from pathlib import Path
+
 import pytest
-from sqlalchemy import inspect, text
+from alembic import command
+from alembic.config import Config
+from sqlalchemy import Engine, inspect, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -70,3 +75,21 @@ def test_a_status_the_code_does_not_know_is_refused(db_session: Session):
             )
         )
         db_session.flush()
+
+
+def test_running_the_migrations_leaves_existing_loggers_switched_on(engine: Engine):
+    """Alembic's `fileConfig` disables every logger that already exists by default.
+
+    Run in-process after the application has created its loggers, that would silence the
+    one that reports every failed Kraken call, and nothing would say so.
+    """
+    logger = logging.getLogger("coinpilot.exchange")
+    logger.disabled = False
+    root = Path(__file__).resolve().parents[2]
+    cfg = Config(str(root / "alembic.ini"))
+    cfg.set_main_option("script_location", str(root / "scripts" / "migrations"))
+    cfg.set_main_option("sqlalchemy.url", engine.url.render_as_string(hide_password=False).replace("%", "%%"))
+
+    command.upgrade(cfg, "head")
+
+    assert logger.disabled is False
