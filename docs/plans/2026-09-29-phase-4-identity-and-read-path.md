@@ -123,8 +123,11 @@ providers are fake; the database is not.
     a database read of the token, and it cannot be revoked; its short life is the bound.
     The status check on every request still makes disabling an account immediate.
   - The **refresh token** is 32 random bytes. The server stores only its SHA-256, which is
-    enough for a value with that much entropy. It lives 30 days by default and is good for
-    **one** use: every refresh marks it used and issues a new one in the same *family*.
+    enough for a value with that much entropy. It is good for **one** use: every refresh
+    marks it used and issues a new one in the same *family*.
+  - **A sign-in has an absolute lifetime**, 30 days by default, counted from the Google
+    login. Every token of a family expires at the same moment, and refreshing never moves
+    it. After that the person signs in with Google again, however active they were.
   - **Reuse detection.** A used token presented again means two parties hold the family.
     The server cannot tell the owner from the thief, so it revokes the whole family and
     both must sign in again.
@@ -509,7 +512,7 @@ Append to `.env.example`:
 JWT_SECRET=
 # Access token lifetime. An access token cannot be revoked, so keep it short.
 JWT_TTL_MINUTES=15
-# Refresh token lifetime. Each one is good for one use and is revoked on logout.
+# How long a sign-in lasts, counted from the Google login. Refreshing never extends it.
 REFRESH_TTL_DAYS=30
 # false only for http://localhost during development.
 COOKIE_SECURE=false
@@ -2168,7 +2171,8 @@ git commit -m "feat(core): sign in with Google using the code flow and PKCE"
   - `core.refresh`: `IssuedRefresh(value, expires_at, user_id, family_id)`,
     `RefreshFailure` (`UNKNOWN`, `EXPIRED`, `REVOKED`, `REUSED`),
     `start_family(session, user_id, now, ttl) -> IssuedRefresh`,
-    `rotate(session, presented, now, ttl) -> IssuedRefresh | RefreshFailure`,
+    `rotate(session, presented, now) -> IssuedRefresh | RefreshFailure` — the new token
+    inherits the family's expiry,
     `revoke(session, presented, now) -> bool`.
 
 The spec's data model (§6) gains a ninth table. Task 13 adds it to the spec.
@@ -2219,7 +2223,7 @@ def test_a_new_family_stores_the_hash_and_never_the_value(db_session, make_user)
 def test_a_rotation_uses_up_the_token_and_issues_the_next_in_the_family(db_session, make_user):
     first = start_family(db_session, make_user().id, NOW, TTL)
 
-    second = rotate(db_session, first.value, LATER, TTL)
+    second = rotate(db_session, first.value, LATER)
 
     assert isinstance(second, IssuedRefresh)
     assert second.value != first.value
@@ -2227,34 +2231,45 @@ def test_a_rotation_uses_up_the_token_and_issues_the_next_in_the_family(db_sessi
     old, new = _family(db_session, first.family_id)
     assert old.used_at == LATER
     assert new.used_at is None
-    assert new.expires_at == LATER + TTL
+    assert new.expires_at == NOW + TTL
+
+
+def test_refreshing_never_extends_the_sign_in(db_session, make_user):
+    """The family's expiry is fixed at the Google login. Activity does not move it."""
+    first = start_family(db_session, make_user().id, NOW, TTL)
+    almost = NOW + TTL - timedelta(minutes=1)
+
+    second = rotate(db_session, first.value, almost)
+
+    assert second.expires_at == NOW + TTL
+    assert rotate(db_session, second.value, NOW + TTL) is RefreshFailure.EXPIRED
 
 
 def test_the_next_token_rotates_in_turn(db_session, make_user):
     first = start_family(db_session, make_user().id, NOW, TTL)
-    second = rotate(db_session, first.value, LATER, TTL)
+    second = rotate(db_session, first.value, LATER)
 
-    assert isinstance(rotate(db_session, second.value, LATER, TTL), IssuedRefresh)
+    assert isinstance(rotate(db_session, second.value, LATER), IssuedRefresh)
 
 
 def test_a_used_token_presented_again_revokes_the_whole_family(db_session, make_user):
     """Two parties hold the family. The server cannot tell the owner from the thief."""
     first = start_family(db_session, make_user().id, NOW, TTL)
-    second = rotate(db_session, first.value, LATER, TTL)
+    second = rotate(db_session, first.value, LATER)
 
-    assert rotate(db_session, first.value, LATER, TTL) is RefreshFailure.REUSED
-    assert rotate(db_session, second.value, LATER, TTL) is RefreshFailure.REVOKED
+    assert rotate(db_session, first.value, LATER) is RefreshFailure.REUSED
+    assert rotate(db_session, second.value, LATER) is RefreshFailure.REVOKED
     assert all(row.revoked_at == LATER for row in _family(db_session, first.family_id))
 
 
 def test_a_token_nobody_issued_is_unknown(db_session):
-    assert rotate(db_session, "never-issued", NOW, TTL) is RefreshFailure.UNKNOWN
+    assert rotate(db_session, "never-issued", NOW) is RefreshFailure.UNKNOWN
 
 
 def test_an_expired_token_is_refused_and_not_used_up(db_session, make_user):
     first = start_family(db_session, make_user().id, NOW, TTL)
 
-    assert rotate(db_session, first.value, NOW + TTL, TTL) is RefreshFailure.EXPIRED
+    assert rotate(db_session, first.value, NOW + TTL) is RefreshFailure.EXPIRED
     assert _family(db_session, first.family_id)[0].used_at is None
 
 
@@ -2262,7 +2277,7 @@ def test_revoking_ends_the_family_and_says_whether_there_was_one(db_session, mak
     first = start_family(db_session, make_user().id, NOW, TTL)
 
     assert revoke(db_session, first.value, LATER) is True
-    assert rotate(db_session, first.value, LATER, TTL) is RefreshFailure.REVOKED
+    assert rotate(db_session, first.value, LATER) is RefreshFailure.REVOKED
     assert revoke(db_session, "never-issued", LATER) is False
 
 
@@ -2274,7 +2289,7 @@ def test_revoking_one_family_leaves_the_users_other_sign_ins(db_session, make_us
 
     revoke(db_session, phone.value, LATER)
 
-    assert isinstance(rotate(db_session, laptop.value, LATER, TTL), IssuedRefresh)
+    assert isinstance(rotate(db_session, laptop.value, LATER), IssuedRefresh)
 
 
 def test_retention_deletes_only_what_has_expired(db_session, make_user):
@@ -2453,7 +2468,9 @@ them to `__all__`, in alphabetical order.
 ```python
 """The life of a refresh token: issued at sign-in, rotated on every use, revoked at logout.
 
-The tokens of one sign-in form a family, and each token is good for one use. A used token
+The tokens of one sign-in form a family, and each token is good for one use. Every token
+of a family expires when the first one does: a sign-in lasts a fixed time from the Google
+login, and refreshing never extends it. A used token
 that comes back means two parties hold the family. The server cannot tell the owner from
 the thief, so it revokes the whole family, and both must sign in again.
 
@@ -2493,10 +2510,11 @@ class IssuedRefresh:
 
 
 def start_family(session: Session, user_id: uuid.UUID, now: datetime, ttl: timedelta) -> IssuedRefresh:
-    return _issue(session, user_id, uuid.uuid4(), now, ttl)
+    return _issue(session, user_id, uuid.uuid4(), now, expires_at=now + ttl)
 
 
-def rotate(session: Session, presented: str, now: datetime, ttl: timedelta) -> IssuedRefresh | RefreshFailure:
+def rotate(session: Session, presented: str, now: datetime) -> IssuedRefresh | RefreshFailure:
+    """Uses up the token and issues the next one of its family, with the family's expiry."""
     token = db.get_refresh_token_for_update(session, hash_refresh_token(presented))
     if token is None:
         return RefreshFailure.UNKNOWN
@@ -2510,7 +2528,8 @@ def rotate(session: Session, presented: str, now: datetime, ttl: timedelta) -> I
     if token.expires_at <= now:
         return RefreshFailure.EXPIRED
     db.mark_refresh_token_used(session, token, now)
-    return _issue(session, token.user_id, token.family_id, now, ttl)
+    # The expiry is inherited, never recomputed: a sign-in has an absolute lifetime.
+    return _issue(session, token.user_id, token.family_id, now, expires_at=token.expires_at)
 
 
 def revoke(session: Session, presented: str, now: datetime) -> bool:
@@ -2527,10 +2546,9 @@ def _issue(
     user_id: uuid.UUID,
     family_id: uuid.UUID,
     now: datetime,
-    ttl: timedelta,
+    expires_at: datetime,
 ) -> IssuedRefresh:
     value = new_refresh_token()
-    expires_at = now + ttl
     db.add_refresh_token(
         session,
         user_id=user_id,
@@ -2875,6 +2893,7 @@ def test_a_refresh_returns_a_new_pair_for_the_same_user(api, app_context):
     assert response.status_code == 200
     renewed = response.json()
     assert renewed["refresh_token"] != signed_in["refresh_token"]
+    assert renewed["refresh_expires_at"] == signed_in["refresh_expires_at"]
     assert app_context.signer.verify(renewed["access_token"]) == app_context.signer.verify(
         signed_in["access_token"]
     )
@@ -3251,7 +3270,8 @@ def _signed_in(context: AppContext, user_id: uuid.UUID, refresh: IssuedRefresh) 
     response.set_cookie(
         REFRESH_COOKIE,
         refresh.value,
-        max_age=int(context.config.refresh_ttl.total_seconds()),
+        # What is left of the sign-in, not a fresh lifetime: the expiry is absolute.
+        max_age=int((refresh.expires_at - context.now()).total_seconds()),
         path=REFRESH_COOKIE_PATH,
         httponly=True,
         secure=context.config.cookie_secure,
@@ -3335,7 +3355,7 @@ def refresh(request: Request, session: Db, context: Ctx, body: RefreshIn | None 
         return _signed_out(401, "no refresh token")
 
     now = context.now()
-    outcome = rotate(session, presented, now, context.config.refresh_ttl)
+    outcome = rotate(session, presented, now)
     if isinstance(outcome, RefreshFailure):
         return _signed_out(401, f"the refresh token is {outcome.value}; sign in again")
 
@@ -5053,8 +5073,9 @@ In `docs/specs/2026-09-17-platform-design.md`, four changes.
 ```markdown
 The provider is Google. A sign-in returns two tokens. The **access token** is a JWT that
 lives 15 minutes and carries the user id and nothing personal. The **refresh token** is a
-random value the server stores only as a SHA-256; it lives 30 days and is good for one
-use. Every refresh issues the next token in the same *family*, and a used token presented
+random value the server stores only as a SHA-256, and it is good for one use. Every
+refresh issues the next token in the same *family*. A sign-in lasts 30 days from the
+Google login, and refreshing never extends it, and a used token presented
 again revokes the whole family, because the server cannot tell the owner from the thief.
 Logout revokes the family. An application sends both tokens in the body and the bearer
 header; a browser receives them as `HttpOnly` cookies, the refresh cookie `SameSite=Strict`
