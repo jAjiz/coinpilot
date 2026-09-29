@@ -156,3 +156,13 @@ def targets_for(session: Session, user_id: uuid.UUID) -> dict[str, Decimal]:
     different statement from having no row at all.
     """
     return {row.asset: row.target_pct for row in list_assets(session, user_id)}
+
+
+def lock_settings(session: Session, user_id: uuid.UUID) -> UserSettings | None:
+    """The settings row, locked until the transaction ends.
+
+    Taken before a change that is checked against the user's other rows, such as the
+    weights summing to 100 or less. A second request for the same user waits instead of
+    passing the same check at the same time.
+    """
+    return session.get(UserSettings, user_id, with_for_update=True, populate_existing=True)

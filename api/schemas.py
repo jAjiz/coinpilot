@@ -9,8 +9,11 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, SecretStr, model_validator
+
+from core.db.types import CadenceMode
 
 
 class TokenPairOut(BaseModel):
@@ -56,3 +59,90 @@ class CredentialStatusOut(BaseModel):
     registered: bool
     validated_at: datetime | None = None
     key_version: int | None = None
+
+
+# Nullable columns may be cleared with an explicit null. These may not.
+_NOT_NULL = (
+    "invest_cash_enabled",
+    "cash_rebalance_enabled",
+    "auto_rebalance_enabled",
+    "paused",
+    "min_drift_pct",
+    "min_order_fiat",
+    "invest_cadence_mode",
+    "rebalance_cadence_mode",
+)
+
+
+class ConfigOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    fiat: str
+    invest_cash_enabled: bool
+    cash_rebalance_enabled: bool
+    auto_rebalance_enabled: bool
+    min_drift_pct: Decimal
+    min_order_fiat: Decimal
+    invest_cadence_mode: CadenceMode
+    invest_interval_days: int | None
+    invest_interval_months: int | None
+    invest_cadence_anchor: datetime | None
+    rebalance_cadence_mode: CadenceMode
+    rebalance_interval_days: int | None
+    rebalance_interval_months: int | None
+    rebalance_cadence_anchor: datetime | None
+    next_invest_at: datetime | None
+    next_rebalance_at: datetime | None
+    paused: bool
+
+
+class ConfigPatch(BaseModel):
+    """Every field optional. `next_invest_at` and `next_rebalance_at` are absent on purpose:
+    the scheduler owns them, and `extra="forbid"` turns an attempt into a 422."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    fiat: str | None = None
+    invest_cash_enabled: bool | None = None
+    cash_rebalance_enabled: bool | None = None
+    auto_rebalance_enabled: bool | None = None
+    paused: bool | None = None
+    # Numeric(4,1) and Numeric(10,1): the bounds are the columns'.
+    min_drift_pct: Decimal | None = Field(default=None, ge=0, le=100, decimal_places=1)
+    min_order_fiat: Decimal | None = Field(default=None, ge=0, le=Decimal("999999999.9"), decimal_places=1)
+    invest_cadence_mode: CadenceMode | None = None
+    invest_interval_days: int | None = Field(default=None, ge=0, le=3650)
+    invest_interval_months: int | None = Field(default=None, ge=0, le=120)
+    invest_cadence_anchor: AwareDatetime | None = None
+    rebalance_cadence_mode: CadenceMode | None = None
+    rebalance_interval_days: int | None = Field(default=None, ge=0, le=3650)
+    rebalance_interval_months: int | None = Field(default=None, ge=0, le=120)
+    rebalance_cadence_anchor: AwareDatetime | None = None
+
+    @model_validator(mode="after")
+    def _no_null_for_required(self) -> ConfigPatch:
+        cleared = [
+            name for name in _NOT_NULL if name in self.model_fields_set and getattr(self, name) is None
+        ]
+        if cleared:
+            raise ValueError(f"these settings cannot be null: {', '.join(cleared)}")
+        return self
+
+
+class AssetIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target_pct: Decimal = Field(ge=0, le=100, decimal_places=2)
+
+
+class AssetOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    asset: str
+    pair: str
+    target_pct: Decimal
+
+
+class AssetsOut(BaseModel):
+    assets: list[AssetOut]
+    cash_target_pct: Decimal

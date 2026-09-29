@@ -11,6 +11,7 @@ from core.db.settings import (
     due_users,
     get_settings,
     list_assets,
+    lock_settings,
     targets_for,
     update_settings,
     upsert_asset,
@@ -181,3 +182,14 @@ def test_a_target_of_zero_is_kept_because_it_means_exit(db_session: Session, mak
     upsert_asset(db_session, user.id, asset="DOGE", pair="DOGEEUR", target_pct=D("0"))
 
     assert targets_for(db_session, user.id) == {"DOGE": D("0.00")}
+
+
+def test_locking_settings_returns_the_row(db_session, make_user):
+    user = make_user()
+    create_settings(db_session, user.id, fiat="EUR")
+
+    assert lock_settings(db_session, user.id).fiat == "EUR"
+
+
+def test_locking_settings_that_do_not_exist_is_none(db_session, make_user):
+    assert lock_settings(db_session, make_user().id) is None

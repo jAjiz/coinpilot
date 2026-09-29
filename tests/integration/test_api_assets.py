@@ -1,0 +1,124 @@
+from decimal import Decimal
+
+from core.db.settings import list_assets
+
+
+def _with_fiat(api, headers, fiat="EUR"):
+    api.patch("/config", json={"fiat": fiat}, headers=headers)
+
+
+def test_a_weight_needs_a_fiat_first(api, make_user, login):
+    assert api.put("/assets/XBT", json={"target_pct": "60"}, headers=login(make_user())).status_code == 409
+
+
+def test_an_asset_is_stored_with_its_resolved_pair(api, db_session, make_user, login):
+    user = make_user()
+    headers = login(user)
+    _with_fiat(api, headers)
+
+    response = api.put("/assets/XBT", json={"target_pct": "60"}, headers=headers)
+
+    assert response.status_code == 200
+    assert response.json()["asset"] == "XBT"
+    assert response.json()["pair"] == "XXBTZEUR"
+    assert Decimal(response.json()["target_pct"]) == Decimal("60")
+    assert [row.asset for row in list_assets(db_session, user.id)] == ["XBT"]
+
+
+def test_the_internal_name_and_lower_case_both_mean_the_same_asset(api, db_session, make_user, login):
+    user = make_user()
+    headers = login(user)
+    _with_fiat(api, headers)
+
+    api.put("/assets/xxbt", json={"target_pct": "30"}, headers=headers)
+    api.put("/assets/xbt", json={"target_pct": "40"}, headers=headers)
+
+    rows = list_assets(db_session, user.id)
+    assert [(row.asset, row.target_pct) for row in rows] == [("XBT", Decimal("40"))]
+
+
+def test_an_asset_kraken_does_not_list_is_refused(api, make_user, login):
+    headers = login(make_user())
+    _with_fiat(api, headers)
+
+    assert api.put("/assets/BTC", json={"target_pct": "10"}, headers=headers).status_code == 422
+
+
+def test_the_fiat_cannot_also_be_an_asset(api, make_user, login):
+    headers = login(make_user())
+    _with_fiat(api, headers)
+
+    assert api.put("/assets/EUR", json={"target_pct": "10"}, headers=headers).status_code == 422
+
+
+def test_weights_above_one_hundred_in_total_are_refused(api, db_session, make_user, login):
+    user = make_user()
+    headers = login(user)
+    _with_fiat(api, headers)
+    api.put("/assets/XBT", json={"target_pct": "60"}, headers=headers)
+
+    response = api.put("/assets/ETH", json={"target_pct": "40.01"}, headers=headers)
+
+    assert response.status_code == 422
+    assert [row.asset for row in list_assets(db_session, user.id)] == ["XBT"]
+
+
+def test_changing_one_weight_does_not_count_it_twice(api, make_user, login):
+    headers = login(make_user())
+    _with_fiat(api, headers)
+    api.put("/assets/XBT", json={"target_pct": "60"}, headers=headers)
+
+    assert api.put("/assets/XBT", json={"target_pct": "100"}, headers=headers).status_code == 200
+
+
+def test_a_weight_of_zero_is_accepted_because_it_means_exit(api, make_user, login):
+    headers = login(make_user())
+    _with_fiat(api, headers)
+
+    assert api.put("/assets/SOL", json={"target_pct": "0"}, headers=headers).status_code == 200
+
+
+def test_an_asset_with_no_pair_against_the_fiat_is_refused_now(api, make_user, login):
+    """Refused at configuration time, not discovered at order time (spec §3.1)."""
+    headers = login(make_user())
+    _with_fiat(api, headers, fiat="USD")
+
+    assert api.put("/assets/SOL", json={"target_pct": "10"}, headers=headers).status_code == 422
+
+
+def test_an_unreachable_kraken_stores_nothing(api, db_session, make_user, login, fake_kraken):
+    user = make_user()
+    headers = login(user)
+    _with_fiat(api, headers)
+    fake_kraken.down.add("Assets")
+
+    assert api.put("/assets/XBT", json={"target_pct": "60"}, headers=headers).status_code == 503
+    assert list_assets(db_session, user.id) == []
+
+
+def test_a_weight_with_three_decimals_is_refused(api, make_user, login):
+    headers = login(make_user())
+    _with_fiat(api, headers)
+
+    assert api.put("/assets/XBT", json={"target_pct": "10.005"}, headers=headers).status_code == 422
+
+
+def test_the_list_carries_the_cash_target(api, make_user, login):
+    headers = login(make_user())
+    _with_fiat(api, headers)
+    api.put("/assets/XBT", json={"target_pct": "60"}, headers=headers)
+    api.put("/assets/SOL", json={"target_pct": "35"}, headers=headers)
+
+    body = api.get("/assets", headers=headers).json()
+
+    assert [row["asset"] for row in body["assets"]] == ["SOL", "XBT"]
+    assert Decimal(body["cash_target_pct"]) == Decimal("5")
+
+
+def test_an_asset_can_be_removed_once(api, make_user, login):
+    headers = login(make_user())
+    _with_fiat(api, headers)
+    api.put("/assets/XBT", json={"target_pct": "60"}, headers=headers)
+
+    assert api.delete("/assets/xbt", headers=headers).status_code == 204
+    assert api.delete("/assets/XBT", headers=headers).status_code == 404
