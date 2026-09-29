@@ -25,7 +25,7 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["engine", "core", "exchange"]
+source = ["engine", "core", "exchange", "api"]
 
 [tool.coverage.report]
 show_missing = true
