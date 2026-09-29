@@ -1,4 +1,4 @@
-"""The eight tables.
+"""The nine tables.
 
 Every one of them carries `user_id`. There are no singleton rows, and no table holds
 state that belongs to the system rather than to a tenant.
@@ -283,4 +283,34 @@ class EvaluationSession(Base):
         Index("ix_sessions_user_started_at", "user_id", "started_at"),
         # Retention deletes across every user at once, so it needs the date on its own.
         Index("ix_sessions_started_at", "started_at"),
+    )
+
+
+class RefreshToken(Base):
+    """One refresh token. Only its SHA-256 is stored; the value exists only on the client.
+
+    Tokens from one sign-in share a `family_id`. `used_at` is set when a token is rotated
+    and `revoked_at` when its family ends. A token with either set is never accepted again.
+    """
+
+    __tablename__ = "refresh_tokens"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    family_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    token_hash: Mapped[bytes] = mapped_column(LargeBinary(32), nullable=False)
+    # Written from the application's clock, not `now()`, so a test can move time.
+    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("token_hash", name="uq_refresh_tokens_token_hash"),
+        # Revoking a family updates every row in it.
+        Index("ix_refresh_tokens_family_id", "family_id"),
+        # Retention deletes across every user by date.
+        Index("ix_refresh_tokens_expires_at", "expires_at"),
     )

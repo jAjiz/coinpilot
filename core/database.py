@@ -25,6 +25,13 @@ from core.db.proposals import (
     set_status,
     withdraw,
 )
+from core.db.refresh_tokens import (
+    add_refresh_token,
+    delete_expired_refresh_tokens,
+    get_refresh_token_for_update,
+    mark_refresh_token_used,
+    revoke_family,
+)
 from core.db.session import configure, get_engine, session_scope
 from core.db.settings import (
     DueUser,
@@ -58,12 +65,14 @@ from core.db.users import (
 
 __all__ = [
     "DueUser",
+    "add_refresh_token",
     "configure",
     "create_settings",
     "create_user",
     "delete_asset",
     "delete_credentials",
     "delete_evaluations_before",
+    "delete_expired_refresh_tokens",
     "due_users",
     "finish_evaluation",
     "get_by_cl_ord_id",
@@ -71,6 +80,7 @@ __all__ = [
     "get_engine",
     "get_live_proposal",
     "get_proposal",
+    "get_refresh_token_for_update",
     "get_settings",
     "get_user",
     "get_user_by_identity",
@@ -81,9 +91,11 @@ __all__ = [
     "list_orders",
     "mark_failed",
     "mark_filled",
+    "mark_refresh_token_used",
     "pending_orders",
     "record_attempt",
     "record_snapshot",
+    "revoke_family",
     "save_credentials",
     "save_proposal",
     "session_scope",
