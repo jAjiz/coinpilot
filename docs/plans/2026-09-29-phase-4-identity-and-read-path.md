@@ -5285,3 +5285,17 @@ Then sign in again in the browser, and use `POST /auth/logout` there. `/auth/me`
   logout cannot reach it. Section §15 says so, and a test pins it.
 - **Assets use Kraken's short names.** `XBT`, not `BTC`. The project 2 application is the
   natural place to translate for people; this API stays exact.
+
+---
+
+## Departures taken during execution
+
+The code blocks above are the plan as written. Where the repository differs, trust the
+repository.
+
+| Where | What changed | Why |
+|---|---|---|
+| `tests/unit/core/test_tokens.py` | A `_claims` helper builds the claims of the forged tokens | Keeps the lines under 110 characters. No assertion changed. |
+| `tests/unit/core/test_reading.py` | `FakePublic` defaults to a `DEFAULT` marker, not `None` | The fake used `None` both for "use the default" and for "the read failed", so the `prices` and `asset pairs` cases could never fail. The production code was right; the test was not testing it. |
+| `api/schemas.py`, `api/routes/portfolio.py` | `total_value` and `cash` are plain decimal strings, written like the amounts inside `holdings` | `POST /portfolio/refresh` returned `"100"` and `GET /portfolio` returned `"100.000000000000"` for one amount: the column keeps twelve places. A client now sees one amount written one way. |
+| `docs/specs/2026-09-17-platform-design.md` | One run-on sentence of the §5.1 text split in two | Wording only. |
