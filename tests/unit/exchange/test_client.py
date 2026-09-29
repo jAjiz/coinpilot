@@ -4,7 +4,7 @@ from decimal import Decimal
 import httpx
 import pytest
 
-from exchange.client import KrakenClient, MissingCredentials, build_http_client
+from exchange.client import KeyRefused, KrakenClient, MissingCredentials, build_http_client
 from exchange.limits import KeyLimiter
 from exchange.types import Credentials
 
@@ -245,3 +245,74 @@ def test_an_asset_pair_missing_a_field_is_skipped_rather_than_crashing_the_read(
     pairs = client.asset_pairs()
 
     assert set(pairs) == {"GOOD"}
+
+
+def _error(*errors):
+    return httpx.Response(200, json={"error": list(errors), "result": {}})
+
+
+@pytest.mark.parametrize("error", ["EAPI:Invalid key", "EAPI:Invalid signature"])
+def test_a_refused_key_is_told_apart_when_validating(error):
+    client = _client(lambda request: _error(error))
+
+    with pytest.raises(KeyRefused):
+        client.api_key_info()
+
+
+def test_a_secret_that_is_not_base64_is_a_refused_key_when_validating():
+    """Kraken issues base64 secrets. One that does not decode was mistyped."""
+    client = _client(
+        lambda request: _ok({}),
+        credentials=Credentials(api_key="THE-PUBLIC-KEY", api_secret="not base64 at all!"),
+    )
+
+    with pytest.raises(KeyRefused):
+        client.api_key_info()
+
+
+def test_a_bad_nonce_is_this_systems_problem_not_the_keys():
+    client = _client(lambda request: _error("EAPI:Invalid nonce"))
+
+    assert client.api_key_info() is None
+
+
+def test_an_outage_while_validating_is_still_none():
+    def handler(request):
+        raise httpx.ConnectError("connection failed")
+
+    assert _client(handler).api_key_info() is None
+
+
+def test_outside_validation_a_refused_key_is_just_another_none():
+    """The distinction is asked for at one call site. Everywhere else a failure is `None`."""
+    client = _client(lambda request: _error("EAPI:Invalid key"))
+
+    assert client.balance() is None
+
+
+def test_a_refusal_is_logged_without_the_key(caplog):
+    client = _client(lambda request: _error("EAPI:Invalid key"))
+
+    with caplog.at_level(logging.DEBUG, logger="coinpilot.exchange"), pytest.raises(KeyRefused):
+        client.api_key_info()
+
+    assert "refused" in caplog.text
+    assert CREDENTIALS.api_key not in caplog.text
+    assert CREDENTIALS.api_secret not in caplog.text
+
+
+def test_asset_names_map_the_internal_name_to_the_short_one():
+    raw = {"XXBT": {"altname": "XBT", "decimals": 10}, "ZEUR": {"altname": "EUR"}, "SOL": {"altname": "SOL"}}
+    client = _client(lambda request: _ok(raw))
+
+    assert client.assets() == {"XXBT": "XBT", "ZEUR": "EUR", "SOL": "SOL"}
+
+
+def test_an_asset_with_no_short_name_is_skipped():
+    client = _client(lambda request: _ok({"XXBT": {"altname": "XBT"}, "ODD": {"decimals": 8}}))
+
+    assert client.assets() == {"XXBT": "XBT"}
+
+
+def test_asset_names_are_none_when_kraken_cannot_be_read():
+    assert _client(lambda request: httpx.Response(503)).assets() is None

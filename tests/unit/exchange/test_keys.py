@@ -1,3 +1,4 @@
+from exchange.client import KeyRefused
 from exchange.keys import FORBIDDEN_PERMISSIONS, REQUIRED_PERMISSIONS, validate_key
 from exchange.types import KeyRejection
 
@@ -115,3 +116,17 @@ def test_the_result_carries_no_part_of_the_key():
 
     assert "api_key" not in repr(result)
     assert "secret" not in repr(result).lower()
+
+
+class RefusingClient:
+    def api_key_info(self):
+        raise KeyRefused("GetApiKeyInfo")
+
+
+def test_a_key_kraken_refuses_is_invalid_not_unreachable():
+    """The person mistyped something. Telling them Kraken is down sends them to wait."""
+    result = validate_key(RefusingClient())
+
+    assert result.accepted is False
+    assert result.rejection is KeyRejection.INVALID_KEY
+    assert result.permissions == ()

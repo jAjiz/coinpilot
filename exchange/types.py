@@ -86,6 +86,7 @@ class KeyRejection(StrEnum):
     """Why a key was refused. Never shown to anyone but its own owner."""
 
     FORBIDDEN_PERMISSIONS = "forbidden_permissions"
+    INVALID_KEY = "invalid_key"
     MISSING_PERMISSIONS = "missing_permissions"
     UNREACHABLE = "unreachable"
 
