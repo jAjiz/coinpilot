@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from core.db.settings import list_assets
+from core.db.settings import create_settings, list_assets, upsert_asset
 
 
 def _with_fiat(api, headers, fiat="EUR"):
@@ -122,3 +122,42 @@ def test_an_asset_can_be_removed_once(api, make_user, login):
 
     assert api.delete("/assets/xbt", headers=headers).status_code == 204
     assert api.delete("/assets/XBT", headers=headers).status_code == 404
+
+
+def test_a_weight_without_a_fiat_is_refused_before_asking_kraken(api, make_user, login, fake_kraken):
+    api.put("/assets/XBT", json={"target_pct": "60"}, headers=login(make_user()))
+
+    assert fake_kraken.calls == []
+
+
+def test_asset_names_and_pairs_are_read_once_for_every_user(api, make_user, login, fake_kraken):
+    """Kraken's catalog is shared: a second user's weight costs no public call."""
+    for _ in range(2):
+        headers = login(make_user())
+        _with_fiat(api, headers)
+        assert api.put("/assets/XBT", json={"target_pct": "60"}, headers=headers).status_code == 200
+
+    assert fake_kraken.calls == ["Assets", "AssetPairs"]
+
+
+def test_an_asset_is_removed_by_the_internal_name_it_was_set_with(api, db_session, make_user, login):
+    user = make_user()
+    headers = login(user)
+    _with_fiat(api, headers)
+    api.put("/assets/XXBT", json={"target_pct": "60"}, headers=headers)
+
+    assert api.delete("/assets/XXBT", headers=headers).status_code == 204
+    assert list_assets(db_session, user.id) == []
+
+
+def test_an_asset_is_removed_by_its_stored_name_when_kraken_is_down(
+    api, db_session, make_user, login, fake_kraken
+):
+    """Written straight to the table, so the catalog has never been read."""
+    user = make_user()
+    create_settings(db_session, user.id, fiat="EUR")
+    upsert_asset(db_session, user.id, asset="XBT", pair="XXBTZEUR", target_pct=Decimal("60"))
+    fake_kraken.down.add("Assets")
+
+    assert api.delete("/assets/xbt", headers=login(user)).status_code == 204
+    assert list_assets(db_session, user.id) == []

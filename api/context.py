@@ -14,6 +14,7 @@ from datetime import datetime
 import httpx
 from sqlalchemy.orm import Session
 
+from core.catalog import MarketCatalog
 from core.config import AppConfig
 from core.crypto import CredentialCipher
 from core.tokens import TokenSigner
@@ -32,6 +33,8 @@ class AppContext:
     limiter: KeyLimiter
     cipher: CredentialCipher
     signer: TokenSigner
+    # Kraken's asset names and pairs, shared by every request for a day.
+    catalog: MarketCatalog
     now: Callable[[], datetime]
 
     def public_kraken(self) -> KrakenClient:

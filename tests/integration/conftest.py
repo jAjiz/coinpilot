@@ -27,13 +27,14 @@ from sqlalchemy.orm import Session
 
 from api.app import create_app
 from api.context import AppContext
+from core.catalog import MarketCatalog
 from core.config import AppConfig, GoogleConfig
 from core.crypto import CredentialCipher
 from core.db.models import User
 from core.db.session import create_engine_from_url
 from core.db.users import create_user
 from core.tokens import TokenSigner
-from exchange.client import KRAKEN_BASE_URL
+from exchange.client import KRAKEN_BASE_URL, KrakenClient
 from exchange.limits import KeyLimiter
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -223,15 +224,18 @@ def app_context(db_session: Session, fake_kraken: FakeKraken, fake_google: FakeG
         else:
             nested.commit()
 
+    kraken_http = httpx.Client(base_url=KRAKEN_BASE_URL, transport=httpx.MockTransport(fake_kraken))
+    limiter = KeyLimiter(0.0)
     return AppContext(
         config=config,
         sessions=sessions,
-        kraken_http=httpx.Client(base_url=KRAKEN_BASE_URL, transport=httpx.MockTransport(fake_kraken)),
+        kraken_http=kraken_http,
         google_http=httpx.Client(transport=httpx.MockTransport(fake_google)),
-        limiter=KeyLimiter(0.0),
+        limiter=limiter,
         cipher=CredentialCipher(config.credential_keys, config.credential_key_version),
         # One clock for the whole application: the tokens expire on the time the test fixes.
         signer=TokenSigner(config.jwt_secret, config.jwt_ttl, now=lambda: FIXED_NOW),
+        catalog=MarketCatalog(KrakenClient(kraken_http, limiter), lambda: FIXED_NOW),
         now=lambda: FIXED_NOW,
     )
 
