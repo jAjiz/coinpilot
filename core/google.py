@@ -57,6 +57,14 @@ def authorization_url(config: GoogleConfig, login: LoginState) -> str:
     return f"{AUTHORIZE_URL}?{urlencode(query)}"
 
 
+def _object(response: httpx.Response) -> dict:
+    """The JSON body, which must be an object. Anything else is a `ValueError`, like bad JSON."""
+    body = response.json()
+    if not isinstance(body, dict):
+        raise ValueError("the body is not a JSON object")
+    return body
+
+
 def exchange_code(http: httpx.Client, config: GoogleConfig, code: str, verifier: str) -> GoogleIdentity:
     try:
         token = http.post(
@@ -72,18 +80,18 @@ def exchange_code(http: httpx.Client, config: GoogleConfig, code: str, verifier:
         )
         if token.status_code != 200:
             raise GoogleLoginFailed("google refused the authorization code")
-        access = token.json().get("access_token")
+        access = _object(token).get("access_token")
         if not access:
             raise GoogleLoginFailed("google returned no access token")
 
         userinfo = http.get(USERINFO_URL, headers={"Authorization": f"Bearer {access}"})
         if userinfo.status_code != 200:
             raise GoogleLoginFailed("google did not return the account")
-        body = userinfo.json()
+        body = _object(userinfo)
     except httpx.HTTPError:
         raise GoogleLoginFailed("google could not be reached") from None
     except ValueError:
-        raise GoogleLoginFailed("google returned something that is not JSON") from None
+        raise GoogleLoginFailed("google returned something that is not a JSON object") from None
 
     subject = body.get("sub")
     email = body.get("email")

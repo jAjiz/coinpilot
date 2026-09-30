@@ -136,3 +136,14 @@ def test_a_failure_message_carries_no_secret():
 
     assert "test-client-secret" not in str(caught.value)
     assert "the-verifier" not in str(caught.value)
+
+
+@pytest.mark.parametrize("host", ["oauth2.googleapis.com", "openidconnect.googleapis.com"])
+def test_json_that_is_not_an_object_is_a_failed_login_not_a_crash(host):
+    def handler(request):
+        if request.url.host == host:
+            return httpx.Response(200, json=["not", "an", "object"])
+        return _google()(request)
+
+    with pytest.raises(GoogleLoginFailed):
+        exchange_code(_http(handler), CONFIG, "code", "verifier")
