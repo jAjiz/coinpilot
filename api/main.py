@@ -28,6 +28,10 @@ KRAKEN_MIN_INTERVAL_SECONDS = 1.0
 def build() -> FastAPI:
     config = load_config(os.environ)
     configure(config.database_url)
+
+    def now() -> datetime:
+        return datetime.now(UTC)
+
     context = AppContext(
         config=config,
         sessions=session_scope,
@@ -35,7 +39,7 @@ def build() -> FastAPI:
         google_http=httpx.Client(timeout=10.0),
         limiter=KeyLimiter(KRAKEN_MIN_INTERVAL_SECONDS),
         cipher=CredentialCipher(config.credential_keys, config.credential_key_version),
-        signer=TokenSigner(config.jwt_secret, config.jwt_ttl),
-        now=lambda: datetime.now(UTC),
+        signer=TokenSigner(config.jwt_secret, config.jwt_ttl, now=now),
+        now=now,
     )
     return create_app(context)

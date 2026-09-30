@@ -106,10 +106,19 @@ class TokenSigner:
                 algorithms=[ALGORITHM],
                 audience=AUDIENCE,
                 issuer=ISSUER,
-                options={"require": ["exp", "iat", "iss", "aud", "typ"]},
+                # PyJWT reads the machine's clock and cannot be handed another, so the
+                # expiry is checked below on the clock that issued the token.
+                options={
+                    "require": ["exp", "iat", "iss", "aud", "typ"],
+                    "verify_exp": False,
+                    "verify_iat": False,
+                },
             )
         except jwt.PyJWTError:
             raise TokenInvalid("the token does not verify") from None
+        expires = claims["exp"]
+        if not isinstance(expires, int | float) or expires <= self._now().timestamp():
+            raise TokenInvalid("the token has expired")
         if claims.get("typ") != expected_type:
             raise TokenInvalid("the token is meant for something else")
         return claims

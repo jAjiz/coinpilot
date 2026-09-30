@@ -230,7 +230,8 @@ def app_context(db_session: Session, fake_kraken: FakeKraken, fake_google: FakeG
         google_http=httpx.Client(transport=httpx.MockTransport(fake_google)),
         limiter=KeyLimiter(0.0),
         cipher=CredentialCipher(config.credential_keys, config.credential_key_version),
-        signer=TokenSigner(config.jwt_secret, config.jwt_ttl),
+        # One clock for the whole application: the tokens expire on the time the test fixes.
+        signer=TokenSigner(config.jwt_secret, config.jwt_ttl, now=lambda: FIXED_NOW),
         now=lambda: FIXED_NOW,
     )
 

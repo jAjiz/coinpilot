@@ -55,6 +55,30 @@ def test_an_expired_token_is_refused():
         _signer().verify(token.value)
 
 
+def test_the_expiry_is_checked_against_the_signers_clock_not_the_machines():
+    """One clock for issuing and verifying. A signer on a clock fixed in the past still
+    accepts its own fresh token, and refuses it once its own clock passes the expiry."""
+    clock = {"now": datetime(2020, 1, 1, 12, 0, tzinfo=UTC)}
+    signer = _signer(now=lambda: clock["now"])
+    token = signer.issue(USER)
+
+    assert signer.verify(token.value) == USER
+    clock["now"] += timedelta(hours=1)
+    with pytest.raises(TokenInvalid):
+        signer.verify(token.value)
+
+
+def test_the_login_state_expires_on_the_signers_clock():
+    clock = {"now": datetime(2020, 1, 1, 12, 0, tzinfo=UTC)}
+    signer = _signer(now=lambda: clock["now"])
+    state = signer.issue_login_state(LoginState(state="s", verifier="v"))
+
+    assert signer.verify_login_state(state).state == "s"
+    clock["now"] += timedelta(minutes=10)
+    with pytest.raises(TokenInvalid):
+        signer.verify_login_state(state)
+
+
 def test_a_token_signed_with_another_secret_is_refused():
     token = _signer(secret="o" * 32).issue(USER)
 
