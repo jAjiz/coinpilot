@@ -87,6 +87,7 @@ class KeyRejection(StrEnum):
 
     FORBIDDEN_PERMISSIONS = "forbidden_permissions"
     INVALID_KEY = "invalid_key"
+    LOCKED_OUT = "locked_out"
     MISSING_PERMISSIONS = "missing_permissions"
     UNREACHABLE = "unreachable"
 

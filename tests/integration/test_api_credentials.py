@@ -72,6 +72,17 @@ def test_a_key_kraken_refuses_is_invalid(api, db_session, make_user, login, fake
     assert get_credentials(db_session, user.id) is None
 
 
+def test_a_locked_out_key_says_to_wait_and_stores_nothing(api, db_session, make_user, login, fake_kraken):
+    user = make_user()
+    fake_kraken.locked_out = True
+
+    response = _register(api, login(user))
+
+    assert response.status_code == 429
+    assert "wait" in response.json()["detail"]
+    assert get_credentials(db_session, user.id) is None
+
+
 def test_an_unreachable_kraken_stores_nothing(api, db_session, make_user, login, fake_kraken):
     user = make_user()
     fake_kraken.down.add("GetApiKeyInfo")

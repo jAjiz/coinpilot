@@ -22,6 +22,12 @@ def register(body: CredentialsIn, user: CurrentUser, session: Db, context: Ctx) 
     result = validate_key(context.kraken_for(credentials))
     if result.rejection is KeyRejection.UNREACHABLE:
         raise HTTPException(503, "kraken could not be reached; the key was not stored")
+    if result.rejection is KeyRejection.LOCKED_OUT:
+        raise HTTPException(
+            429,
+            "kraken has locked the account out after repeated invalid keys; wait a few minutes"
+            " before trying again, since every attempt restarts the lockout",
+        )
     if not result.accepted:
         raise HTTPException(
             422,

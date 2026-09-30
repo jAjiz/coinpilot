@@ -1,4 +1,4 @@
-from exchange.client import KeyRefused
+from exchange.client import KeyLockedOut, KeyRefused
 from exchange.keys import FORBIDDEN_PERMISSIONS, REQUIRED_PERMISSIONS, validate_key
 from exchange.types import KeyRejection
 
@@ -130,3 +130,16 @@ def test_a_key_kraken_refuses_is_invalid_not_unreachable():
     assert result.accepted is False
     assert result.rejection is KeyRejection.INVALID_KEY
     assert result.permissions == ()
+
+
+class LockedOutClient:
+    def api_key_info(self):
+        raise KeyLockedOut("GetApiKeyInfo")
+
+
+def test_a_lockout_is_its_own_rejection():
+    """Neither a wrong key nor an outage: the person must wait, and a retry makes it longer."""
+    result = validate_key(LockedOutClient())
+
+    assert result.accepted is False
+    assert result.rejection is KeyRejection.LOCKED_OUT

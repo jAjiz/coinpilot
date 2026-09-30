@@ -128,6 +128,7 @@ class FakeKraken:
         self.permissions = list(REQUIRED)
         self.ip_allowlist = []
         self.refuse_key = False
+        self.locked_out = False
         self.down = set()
         self.assets = {"XXBT": "XBT", "XETH": "ETH", "ZEUR": "EUR", "ZUSD": "USD", "SOL": "SOL"}
         self.pairs = {
@@ -145,6 +146,8 @@ class FakeKraken:
         if endpoint in self.down:
             return httpx.Response(503)
         if endpoint == "GetApiKeyInfo":
+            if self.locked_out:
+                return httpx.Response(200, json={"error": ["EGeneral:Temporary lockout"], "result": {}})
             if self.refuse_key:
                 return httpx.Response(200, json={"error": ["EAPI:Invalid key"], "result": {}})
             return _ok({"permissions": self.permissions, "ipAllowlist": self.ip_allowlist})

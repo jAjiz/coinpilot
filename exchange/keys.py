@@ -10,7 +10,7 @@ that a key the platform holds never started out able to withdraw.
 
 from __future__ import annotations
 
-from exchange.client import KeyRefused
+from exchange.client import KeyLockedOut, KeyRefused
 from exchange.types import KeyRejection, KeyValidation
 
 # `query-open-trades` and `query-closed-trades` are here because resolving a lost order
@@ -43,6 +43,8 @@ def validate_key(client) -> KeyValidation:
         info = client.api_key_info()
     except KeyRefused:
         return _refused(KeyRejection.INVALID_KEY)
+    except KeyLockedOut:
+        return _refused(KeyRejection.LOCKED_OUT)
     if info is None:
         return _refused(KeyRejection.UNREACHABLE)
 

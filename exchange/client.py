@@ -45,6 +45,16 @@ class KeyRefused(Exception):
     """
 
 
+class KeyLockedOut(Exception):
+    """Kraken has locked the account out after repeated invalid keys, typically for a few
+    minutes. Every attempt restarts the lockout, so the caller must wait, not retry.
+
+    Raised, like `KeyRefused`, only where the caller asked to tell it apart.
+    """
+
+
+_LOCKOUT_ERROR = "EGeneral:Temporary lockout"
+
 # A nonce error is left out on purpose: it means this system's clock or counter is wrong,
 # not that the person typed the wrong key.
 _REFUSED_KEY_ERRORS = ("EAPI:Invalid key", "EAPI:Invalid signature")
@@ -52,6 +62,10 @@ _REFUSED_KEY_ERRORS = ("EAPI:Invalid key", "EAPI:Invalid signature")
 
 def _is_refusal(errors: tuple[str, ...]) -> bool:
     return any(str(error).startswith(_REFUSED_KEY_ERRORS) for error in errors)
+
+
+def _is_lockout(errors: tuple[str, ...]) -> bool:
+    return any(str(error).startswith(_LOCKOUT_ERROR) for error in errors)
 
 
 def build_http_client(timeout_seconds: float = 10.0) -> httpx.Client:
@@ -154,6 +168,9 @@ class KrakenClient:
             if refusals and _is_refusal(exc.errors):
                 logger.warning("kraken %s refused the key", endpoint)
                 raise KeyRefused(endpoint) from None
+            if refusals and _is_lockout(exc.errors):
+                logger.warning("kraken %s is locked out after repeated invalid keys", endpoint)
+                raise KeyLockedOut(endpoint) from None
             logger.warning("kraken %s failed: %s", endpoint, self._redact(str(exc)))
             return None
         except Exception as exc:
@@ -230,8 +247,9 @@ class KrakenClient:
     def api_key_info(self) -> dict | None:
         """Requires no permission to call, which is why key validation starts here.
 
-        Raises `KeyRefused` when Kraken says the key or its secret is wrong. `None` still
-        means Kraken could not be asked.
+        Raises `KeyRefused` when Kraken says the key or its secret is wrong, and
+        `KeyLockedOut` when it has stopped listening after too many wrong ones. `None`
+        still means Kraken could not be asked.
         """
         return self._private("GetApiKeyInfo", refusals=True)
 

@@ -4,7 +4,7 @@ from decimal import Decimal
 import httpx
 import pytest
 
-from exchange.client import KeyRefused, KrakenClient, MissingCredentials, build_http_client
+from exchange.client import KeyLockedOut, KeyRefused, KrakenClient, MissingCredentials, build_http_client
 from exchange.limits import KeyLimiter
 from exchange.types import Credentials
 
@@ -268,6 +268,20 @@ def test_a_secret_that_is_not_base64_is_a_refused_key_when_validating():
 
     with pytest.raises(KeyRefused):
         client.api_key_info()
+
+
+def test_a_lockout_is_told_apart_when_validating():
+    """Kraken locks out after repeated invalid keys. Retrying extends it, so it is not an outage."""
+    client = _client(lambda request: _error("EGeneral:Temporary lockout"))
+
+    with pytest.raises(KeyLockedOut):
+        client.api_key_info()
+
+
+def test_outside_validation_a_lockout_is_just_another_none():
+    client = _client(lambda request: _error("EGeneral:Temporary lockout"))
+
+    assert client.balance() is None
 
 
 def test_a_bad_nonce_is_this_systems_problem_not_the_keys():
