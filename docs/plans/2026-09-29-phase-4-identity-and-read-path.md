@@ -5299,3 +5299,16 @@ repository.
 | `tests/unit/core/test_reading.py` | `FakePublic` defaults to a `DEFAULT` marker, not `None` | The fake used `None` both for "use the default" and for "the read failed", so the `prices` and `asset pairs` cases could never fail. The production code was right; the test was not testing it. |
 | `api/schemas.py`, `api/routes/portfolio.py` | `total_value` and `cash` are plain decimal strings, written like the amounts inside `holdings` | `POST /portfolio/refresh` returned `"100"` and `GET /portfolio` returned `"100.000000000000"` for one amount: the column keeps twelve places. A client now sees one amount written one way. |
 | `docs/specs/2026-09-17-platform-design.md` | One run-on sentence of the §5.1 text split in two | Wording only. |
+| `core/tokens.py`, `api/main.py` | `TokenSigner` checks `exp` on its own clock, and the entry point hands it the context's clock | PyJWT checked expiry on the machine's clock while tokens were issued on the injected one: the application ran on two clocks. |
+| `core/catalog.py`, `api/routes/assets.py` | Kraken's asset names and pairs come from a `MarketCatalog` read at most once a day; `PUT /assets` locks the settings row only after reading it | The plan locked the row, then made two public calls. Every public call shares one bucket paced at a call a second, so users queued behind each other holding a lock and a connection. |
+| `api/routes/assets.py` | `DELETE /assets/{asset}` accepts the names `PUT` accepts | `PUT /assets/XXBT` stored `XBT`, and `DELETE /assets/XXBT` answered 404. |
+| `core/google.py` | A Google answer that is not a JSON object fails the login | `.get()` on a list raised `AttributeError`, a 500 instead of a 400. |
+| `exchange/client.py`, `exchange/keys.py`, `api/routes/credentials.py` | `EGeneral:Temporary lockout` is `KeyRejection.LOCKED_OUT`, a 429 that says to wait | It was reported as an outage, which invites the retries that keep the lockout going. |
+
+Found in review and left for later:
+
+- **`KeyLimiter` keeps an entry for every key it has seen**, including every wrong key
+  sent to `POST /credentials`. The web process's memory grows with them until it restarts.
+  Evicting idle keys belongs with the production hardening of phase 8.
+- **Two refreshes with the same token end the sign-in** and **expired refresh tokens are
+  not deleted**: both already listed under *What this phase deliberately leaves out*.
