@@ -285,8 +285,8 @@ class EvaluationSession(Base):
     duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # No check constraint, and that is the one deliberate exception. Telemetry gains
     # values over time, and a constraint here would make each one a migration while
-    # protecting nothing that matters.
-    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    # protecting nothing that matters. Wide enough for the longest, `KRAKEN_UNAVAILABLE`.
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
     # Text, not JSONB: fetched whole and never queried into.
     log_messages: Mapped[str | None] = mapped_column(Text, nullable=True)
 
