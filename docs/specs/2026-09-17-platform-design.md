@@ -1,6 +1,6 @@
 # CoinPilot — Platform Design
 
-**Date:** 2026-09-17 · **Status:** approved, not yet implemented · **Scope:** Project 1 of 2
+**Date:** 2026-09-17 · **Status:** approved; phases 1 to 4 implemented · **Scope:** Project 1 of 2
 
 ---
 
@@ -80,6 +80,10 @@ Investing cash only ever spends fiat the user already deposited, so the worst ou
 a bug on that path is a bad price. A rebalance sells, and the worst outcome there is a
 destroyed position, which cannot be undone. That is why it sits behind an explicit
 decision, taken per operation or once, by enabling automatic rebalancing.
+
+An invest operation runs on its cadence once the user turns `invest_cash_enabled` on, and
+by hand at any time through `POST /invest`. A new user starts with it off: configuring
+weights to look at a portfolio must not, on its own, start spending the user's fiat.
 
 An operation is atomic for approval. A rebalance is approved or executed whole, including
 any cash-funded buys it contains.
@@ -233,12 +237,14 @@ Every table carries `user_id`. There are no singleton rows.
 | `user_credentials` | Encrypted Kraken key and secret, nonce, master-key version, validation timestamp. |
 | `user_settings` | One row per user: `fiat`, `invest_cash_enabled`, `cash_rebalance_enabled`, `auto_rebalance_enabled`, `min_drift_pct`, `min_order_fiat`, both cadences, `next_invest_at`, `next_rebalance_at`, `paused`. |
 | `asset_config` | One row per user and asset: resolved pair, `target_pct`. |
-| `orders` | Every order attempted: `cl_ord_id`, txid, reason, status, requested amount, executed volume, price, fee. |
+| `orders` | Every order attempted: `cl_ord_id`, txid, reason, status, requested amount, cost, executed volume, price, fee, and Kraken's error code when it refused the order. |
 | `proposal` | The live proposal, at most one per user: version, plan, trigger, status. |
 | `portfolio_snapshots` | Time series of portfolio value. |
 | `sessions` | One row per user evaluation: status, duration, captured log lines. |
 
 Settings types: `min_drift_pct` is `Numeric(4,1)`, `min_order_fiat` is `Numeric(10,1)`.
+Defaults: `invest_cash_enabled` off (§3.4), and `min_order_fiat` 0, which means Kraken's
+own minimum alone (§7.3).
 
 `portfolio_snapshots` exists from day one. Without it there is no way to answer how the
 portfolio has performed over time, and the series cannot be reconstructed afterwards. It is
@@ -287,8 +293,20 @@ constraint and always executes on arrival.
 
 ### 7.3 Filters
 
-A leg below `min_order_fiat` is dropped. An asset whose drift is below `min_drift_pct`
-produces no leg. With `min_drift_pct` at 0, `min_order_fiat` is the effective floor.
+An asset whose drift is below `min_drift_pct` produces no leg.
+
+A leg below its **effective minimum** is dropped before anything is sent. The effective
+minimum is the larger of `min_order_fiat` and Kraken's own minimum for the leg's pair at
+the current price, `max(costmin, ordermin × price)`. The engine applies `min_order_fiat`;
+the executor, which holds each pair's metadata, applies Kraken's.
+
+Kraken's minimum moves with the price and differs per pair, so it is computed when an
+order is about to be placed and never validated when a setting is saved: a value valid
+today would turn invalid tomorrow without anyone touching it. No value of `min_order_fiat`
+can therefore produce an order Kraken refuses. It is an optional floor of the user's own
+above Kraken's, and 0 means Kraken's alone. A dropped leg is written to the evaluation's
+log, and its cash waits for the next operation. `GET /assets` shows each asset's current
+Kraken minimum, so a user can see which amounts make sense.
 
 ## 8. The proposal lifecycle
 
@@ -322,6 +340,15 @@ drifted weight be corrected. The cost is the taker fee
 against the maker fee: 0.40 % against 0.25 %, so 0.15 percentage points of every amount
 traded.
 
+**A buy is expressed in fiat.** `viqc` makes the order's volume an amount of the quote
+currency, and `fcib` takes the fee in the asset bought. The order spends exactly the
+leg's amount: neither the fee nor a price move between the read and the fill can make it
+ask for more fiat than there is. They change only how much of the asset arrives. Kraken
+accepts `viqc` on buy market orders only, so a sell is expressed in the base asset's
+volume, which is what the user holds. Whether Kraken reports the fee of an `fcib` order in
+the base or the quote currency is verified on the first real order; until then the ledger
+stores what Kraken returns, unconverted.
+
 ### 9.2 The unknown result
 
 `_safe_call` returns `None` on any error, and `None` cannot distinguish three realities:
@@ -340,15 +367,17 @@ that produced the lost response.
 The protocol:
 
 1. **Write before sending.** An `orders` row is inserted `PENDING` with the minted
-   `cl_ord_id` *before* `AddOrder` is called. Persisted state must describe the attempt
-   before the attempt happens.
-2. **Never guess on `None`.** The row stays `PENDING`.
-3. **Resolve before computing.** Every evaluation starts by resolving `PENDING` rows with
-   `find_order_by_cl_ord_id`:
+   `cl_ord_id` and **committed** *before* `AddOrder` is called. Persisted state must
+   describe the attempt before the attempt happens, and a row still inside an open
+   transaction does not survive the process that wrote it.
+2. **Never guess on an unknown answer.** The row stays `PENDING` (§9.4).
+3. **Resolve before computing.** Every evaluation starts by resolving `PENDING` rows. A row
+   that holds a txid is read by that txid: the order is known to exist. A row with no
+   txid is looked up with `find_order_by_cl_ord_id`:
 
 | Answer | Meaning | Action |
 |---|---|---|
-| A txid | The order exists | Adopt it, read the fill, mark `FILLED` |
+| A txid | The order exists | Adopt it and read its fill (§9.5) |
 | `None` | The lookup itself failed | Still unknown: stay `PENDING`, skip this user's evaluation, count toward the failure streak |
 | Answered, absent | Genuine absence | Mark `FAILED`; the next plan retries naturally |
 
@@ -363,6 +392,48 @@ balance is a wrong plan, and doing nothing for one round is safe here.
 Each leg is an independent order recorded in `orders`. If the second leg fails, the first
 stands and the next evaluation recomputes from the real balance. The balance is the
 truth, which is why the system converges instead of becoming inconsistent.
+
+### 9.4 What an answer to `AddOrder` means
+
+When in doubt, an order is **unknown**, never **failed**. Erring towards unknown costs a
+round of waiting; erring towards failed costs a duplicate order.
+
+| Answer | Reading | Row |
+|---|---|---|
+| A txid | Sent | `PENDING` with its txid, then the fill is read (§9.5) |
+| A definitive refusal: `EOrder:*`, `EGeneral:Invalid arguments`, `EGeneral:Permission denied`, `EAPI:*`, a market in `cancel_only` or `post_only` mode | The order does not exist | `FAILED`, with Kraken's code |
+| Anything else: a timeout, a network error, an HTTP 5xx, `EService:Unavailable`, `EService:Busy`, `EGeneral:Internal error`, any code not listed | Unknown | `PENDING` with no txid |
+
+The list of definitive refusals is **closed**. A code Kraken adds, or one this system has
+never seen, is read as unknown.
+
+After an unknown answer, no further leg of the operation is sent: the balance is now
+ambiguous, and the next evaluation resolves first. After a definitive refusal, the other
+legs proceed; they are independent orders (§9.3), and a refused XBT buy says nothing about
+an ETH one.
+
+### 9.5 Reading a fill
+
+Once a txid is known, the order is read by it.
+
+| Kraken status | Row |
+|---|---|
+| `closed` | `FILLED`, with executed volume, average price, fee and cost |
+| `canceled` or `expired`, something executed | `FILLED`, with what executed. Kraken's market price protection can cancel the rest of a market order |
+| `canceled` or `expired`, nothing executed | `FAILED` |
+| `open` or `pending`, or the read failed | Stays `PENDING`, with its txid |
+
+There is no partial status. `FILLED` means *finished, and this is what executed*; the gap
+between `requested_fiat` and `cost` shows a partial fill, and the next operation starts
+from the real balance, so what was left is invested then.
+
+### 9.6 One evaluation per user at a time
+
+Two evaluations of one user at once could spend the same cash twice. An evaluation holds a
+PostgreSQL advisory lock on the user's id for its whole length; a second one finds it held
+and does nothing (`409` through the API). The executor runs in short transactions of its
+own, never inside a request's: no transaction stays open while Kraken is waited on, and
+every row it writes is committed before the next call to Kraken.
 
 ## 10. The scheduler
 
@@ -450,9 +521,10 @@ threshold and one when it recovers, never one per failure.
 | `GET /auth/login/{provider}`, `GET /auth/callback/{provider}`, `POST /auth/refresh`, `POST /auth/logout`, `GET /auth/me` | OAuth sign-in, token refresh and logout |
 | `POST /credentials`, `DELETE /credentials`, `GET /credentials/status` | Kraken key, validated on write per §5.2 |
 | `GET /config`, `PATCH /config` | Settings |
-| `GET /assets`, `PUT /assets/{asset}`, `DELETE /assets/{asset}` | Target weights |
+| `GET /assets`, `PUT /assets/{asset}`, `DELETE /assets/{asset}` | Target weights, each shown with Kraken's current minimum order |
 | `GET /portfolio`, `POST /portfolio/refresh` | Snapshot and on-demand refresh |
 | `GET /proposal`, `POST /proposal/approve`, `DELETE /proposal` | The live proposal; approval carries the version |
+| `POST /invest` | Invest free cash now, as the invest operation does. Needs no approval (§3.4). With `?preview=true` it computes the plan, has Kraken validate each order without executing it, and records nothing |
 | `POST /rebalance` | One-off: evaluate now with sells allowed. Creates or refreshes the proposal; it never executes a sell by itself |
 | `GET /orders`, `GET /sessions` | History |
 
@@ -480,7 +552,8 @@ Five additions specific to this system:
 - **Credential handling is tested.** Ciphertext differs from plaintext; no response schema
   carries a credential field; no log line contains a secret.
 - **The unknown-result protocol is tested in all three branches.** It is the highest-risk
-  code in the system.
+  code in the system. Every class of answer to `AddOrder` is tested too, including a code
+  the system has never seen, which must leave the row `PENDING`.
 
 No integration test places a real order. Against Kraken, `validate=true` only.
 
@@ -509,6 +582,14 @@ Non-obvious decisions a reviewer would otherwise question.
   fee.
 - **`cl_ord_id` survives anyway.** It solves the lost response, which is independent of
   order type. It is a safety net for a rare path, not a central mechanism.
+- **A buy is placed in fiat, not as a volume with a margin.** A volume computed from the
+  ticker spends more than planned once the fee and any price move are added, and a margin
+  wide enough to absorb both leaves cash uninvested on every operation. `viqc` with `fcib`
+  spends exactly the plan (§9.1).
+- **Kraken's minimum is applied at execution, not validated in settings.** It depends on
+  the price, so any check made when a setting is saved goes stale (§7.3).
+- **An unrecognised error is unknown, not a refusal.** The list of definitive refusals is
+  closed, because reading a new code as a refusal is how a duplicate order happens (§9.4).
 - **Cash is the remainder of the weights, not a separate reserve.** One model, one
   denominator, and cash drift is measured like any other.
 - **A configured asset at 0 % means "exit"; an unconfigured asset means "not mine to
