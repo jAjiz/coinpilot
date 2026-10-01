@@ -144,6 +144,9 @@ class AssetOut(BaseModel):
     asset: str
     pair: str
     target_pct: Decimal
+    # Kraken's smallest order on the asset's pair, in fiat, at the current price (§7.3).
+    # Absent from `PUT`, and `null` when Kraken could not be read.
+    kraken_min_fiat: str | None = None
 
 
 class AssetsOut(BaseModel):
