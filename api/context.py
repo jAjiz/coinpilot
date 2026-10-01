@@ -6,6 +6,7 @@ and a session that rolls back. Nothing under `api/` constructs a dependency of i
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
@@ -35,6 +36,8 @@ class AppContext:
     signer: TokenSigner
     # Kraken's asset names and pairs, shared by every request for a day.
     catalog: MarketCatalog
+    # One evaluation per user at a time (spec §9.6). Yields whether the lock was taken.
+    user_lock: Callable[[uuid.UUID], AbstractContextManager[bool]]
     now: Callable[[], datetime]
 
     def public_kraken(self) -> KrakenClient:

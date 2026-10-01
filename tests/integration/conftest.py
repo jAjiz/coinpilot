@@ -192,13 +192,39 @@ def fake_kraken() -> FakeKraken:
     return FakeKraken()
 
 
+class FakeLocks:
+    """The per-user lock, without a second connection. A test puts a user in `held` to
+    stand for an evaluation already running."""
+
+    def __init__(self):
+        self.held = set()
+
+    @contextmanager
+    def __call__(self, user_id):
+        if user_id in self.held:
+            yield False
+            return
+        self.held.add(user_id)
+        try:
+            yield True
+        finally:
+            self.held.discard(user_id)
+
+
+@pytest.fixture
+def user_locks() -> FakeLocks:
+    return FakeLocks()
+
+
 @pytest.fixture
 def fake_google() -> FakeGoogle:
     return FakeGoogle()
 
 
 @pytest.fixture
-def app_context(db_session: Session, fake_kraken: FakeKraken, fake_google: FakeGoogle) -> AppContext:
+def app_context(
+    db_session: Session, fake_kraken: FakeKraken, fake_google: FakeGoogle, user_locks: FakeLocks
+) -> AppContext:
     """The application's dependencies, with every provider fake and the database real."""
     config = AppConfig(
         database_url="postgresql+psycopg://unused",
@@ -240,6 +266,7 @@ def app_context(db_session: Session, fake_kraken: FakeKraken, fake_google: FakeG
         # One clock for the whole application: the tokens expire on the time the test fixes.
         signer=TokenSigner(config.jwt_secret, config.jwt_ttl, now=lambda: FIXED_NOW),
         catalog=MarketCatalog(KrakenClient(kraken_http, limiter), lambda: FIXED_NOW),
+        user_lock=user_locks,
         now=lambda: FIXED_NOW,
     )
 

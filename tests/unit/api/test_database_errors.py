@@ -1,7 +1,7 @@
 """A database that cannot be reached is a 503 the client may retry, not a bare 500."""
 
 import uuid
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import UTC, datetime, timedelta
 
 import httpx
@@ -56,6 +56,7 @@ def _api(error: Exception) -> TestClient:
         cipher=CredentialCipher(config.credential_keys, config.credential_key_version),
         signer=signer,
         catalog=MarketCatalog(KrakenClient(http, limiter), lambda: NOW),
+        user_lock=lambda user_id: nullcontext(True),
         now=lambda: NOW,
     )
     client = TestClient(create_app(context), raise_server_exceptions=False)
