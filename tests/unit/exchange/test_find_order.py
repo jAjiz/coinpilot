@@ -2,7 +2,7 @@ from decimal import Decimal
 
 import pytest
 
-from exchange.orders import find_order_by_cl_ord_id, is_definitive_refusal
+from exchange.orders import find_order_by_cl_ord_id, find_order_by_txid, is_definitive_refusal
 from exchange.types import ExchangeOrderStatus
 
 D = Decimal
@@ -17,6 +17,7 @@ def _order(status: str = "closed", cl_ord_id: str = CL_ORD_ID) -> dict:
         "vol_exec": "0.00212765",
         "price": "47000.5",
         "fee": "0.40",
+        "cost": "100.0",
     }
 
 
@@ -173,3 +174,40 @@ def test_a_listed_code_is_a_definitive_refusal(errors):
 def test_anything_else_is_not(errors):
     """The list is closed. Reading a new code as a refusal is how a duplicate happens."""
     assert is_definitive_refusal(errors) is False
+
+
+class FakeQuery:
+    def __init__(self, answer):
+        self._answer = answer
+        self.asked = []
+
+    def query_orders(self, txid):
+        self.asked.append(txid)
+        return self._answer
+
+
+def test_an_order_is_read_by_its_txid_with_what_it_cost():
+    client = FakeQuery({"OTX-1": _order("closed")})
+
+    found = find_order_by_txid(client, "OTX-1")
+
+    assert client.asked == ["OTX-1"]
+    assert found.txid == "OTX-1"
+    assert found.status == ExchangeOrderStatus.CLOSED
+    assert found.cost == D("100.0")
+    assert found.volume_executed == D("0.00212765")
+
+
+def test_a_txid_that_could_not_be_read_is_unknown():
+    assert find_order_by_txid(FakeQuery(None), "OTX-1") is None
+
+
+def test_an_answer_without_the_txid_is_unknown_not_absent():
+    """Kraken named this order. An answer that leaves it out proves nothing."""
+    assert find_order_by_txid(FakeQuery({}), "OTX-1") is None
+
+
+def test_a_lookup_by_client_id_carries_the_cost_too():
+    found = find_order_by_cl_ord_id(FakeClient({}, {"OTX-2": _order("closed")}), CL_ORD_ID)
+
+    assert found.cost == D("100.0")

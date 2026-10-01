@@ -443,3 +443,20 @@ def test_a_refused_order_is_logged_without_the_key(caplog):
 
     assert "Insufficient funds" in caplog.text
     assert CREDENTIALS.api_key not in caplog.text
+
+
+def test_an_order_is_queried_by_its_txid():
+    seen = {}
+
+    def handler(request):
+        seen["form"] = parse_qs(request.content.decode())
+        return _ok({"OTX-1": {"status": "closed", "cl_ord_id": "abc123"}})
+
+    orders = _client(handler).query_orders("OTX-1")
+
+    assert seen["form"]["txid"] == ["OTX-1"]
+    assert orders["OTX-1"]["status"] == "closed"
+
+
+def test_a_query_that_fails_is_none():
+    assert _client(lambda request: httpx.Response(502)).query_orders("OTX-1") is None

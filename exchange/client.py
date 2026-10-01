@@ -339,3 +339,10 @@ class KrakenClient:
     def closed_orders(self, cl_ord_id: str | None = None) -> dict[str, dict] | None:
         raw = self._private("ClosedOrders", {"cl_ord_id": cl_ord_id} if cl_ord_id else None)
         return None if raw is None else raw.get("closed", {})
+
+    def query_orders(self, txid: str) -> dict[str, dict] | None:
+        """Orders by Kraken's own id, open or closed."""
+        raw = self._private("QueryOrders", {"txid": txid})
+        if raw is None:
+            return None
+        return {name: entry for name, entry in raw.items() if isinstance(entry, dict)}
