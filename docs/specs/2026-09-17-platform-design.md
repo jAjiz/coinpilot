@@ -354,8 +354,10 @@ currency although it is taken in the base asset. The ledger stores the three as 
 so `orders.fee` is in fiat. What arrives in the account is `vol_exec − fee / price`; nothing
 relies on it, because every evaluation reads the real balance.
 
-The fee percentages above are the lowest tier of Kraken's published schedule. That first
-order paid 0.8 %, so the account's own tier is what an operation actually costs.
+The fee percentages above were Kraken's when this was written. Kraken has since raised the
+taker fee to 0.8 %, which the first real order paid. The choice stands: an investment
+is small and a rebalance occasional, so the wider gap is a cost accepted, not a reason to
+rest limit orders.
 
 ### 9.2 The unknown result
 
