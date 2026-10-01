@@ -106,3 +106,5 @@ class KeyValidation:
     missing: tuple[str, ...]
     forbidden: tuple[str, ...]
     ip_allowlist: tuple[str, ...]
+    # Granted, neither required nor forbidden: never used, so better turned off. Advice only.
+    unnecessary: tuple[str, ...] = ()

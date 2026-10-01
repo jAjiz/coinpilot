@@ -53,6 +53,9 @@ class KeyAcceptedOut(BaseModel):
     validated_at: datetime
     permissions: list[str]
     ip_allowlist: list[str]
+    # Granted but never used by the platform. Turning them off in Kraken is recommended,
+    # not required: the key was stored.
+    unnecessary: list[str]
 
 
 class CredentialStatusOut(BaseModel):

@@ -40,6 +40,21 @@ def test_the_answer_carries_the_permissions_and_never_the_key(api, make_user, lo
     assert SECRET not in response.text
 
 
+def test_an_accepted_key_names_the_permissions_to_turn_off(api, db_session, make_user, login, fake_kraken):
+    user = make_user()
+    fake_kraken.permissions += ["query-ledger", "close-trades"]
+
+    response = _register(api, login(user))
+
+    assert response.status_code == 201
+    assert response.json()["unnecessary"] == ["close-trades", "query-ledger"]
+    assert get_credentials(db_session, user.id) is not None
+
+
+def test_a_key_with_exactly_what_is_needed_has_nothing_to_turn_off(api, make_user, login):
+    assert _register(api, login(make_user())).json()["unnecessary"] == []
+
+
 def test_a_key_that_can_withdraw_is_refused_and_not_stored(api, db_session, make_user, login, fake_kraken):
     user = make_user()
     fake_kraken.permissions.append("withdraw-funds")
@@ -59,6 +74,7 @@ def test_a_key_missing_a_permission_is_refused_and_says_which(api, make_user, lo
 
     assert response.status_code == 422
     assert response.json()["detail"]["missing"] == ["query-closed-trades"]
+    assert response.json()["detail"]["unnecessary"] == []
 
 
 def test_a_key_kraken_refuses_is_invalid(api, db_session, make_user, login, fake_kraken):

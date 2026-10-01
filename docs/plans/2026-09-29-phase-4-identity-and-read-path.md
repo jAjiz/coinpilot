@@ -5305,6 +5305,7 @@ repository.
 | `core/google.py` | A Google answer that is not a JSON object fails the login | `.get()` on a list raised `AttributeError`, a 500 instead of a 400. |
 | `exchange/client.py`, `exchange/keys.py`, `api/routes/credentials.py` | `EGeneral:Temporary lockout` is `KeyRejection.LOCKED_OUT`, a 429 that says to wait | It was reported as an outage, which invites the retries that keep the lockout going. |
 | `core/db/session.py`, `api/app.py` | Opening a connection gives up after 5 s, and an unreachable database answers 503 | Found during the manual check: with Docker stopped, the Google callback hung for psycopg's default 130 s and then answered a bare 500. |
+| `exchange/keys.py`, `api/routes/credentials.py`, `scripts/check_key.py`, spec §5.2 | A key's permissions beyond the contract are returned as `unnecessary`, with the advice to turn them off; never a reason to refuse | Asked for during the manual check. A stolen key should be able to do as little as possible. |
 
 Found in review and left for later:
 

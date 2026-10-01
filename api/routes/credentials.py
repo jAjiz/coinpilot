@@ -35,6 +35,7 @@ def register(body: CredentialsIn, user: CurrentUser, session: Db, context: Ctx) 
                 "rejection": result.rejection.value,
                 "missing": list(result.missing),
                 "forbidden": list(result.forbidden),
+                "unnecessary": list(result.unnecessary),
             },
         )
 
@@ -45,6 +46,7 @@ def register(body: CredentialsIn, user: CurrentUser, session: Db, context: Ctx) 
         validated_at=validated_at,
         permissions=list(result.permissions),
         ip_allowlist=list(result.ip_allowlist),
+        unnecessary=list(result.unnecessary),
     )
 
 

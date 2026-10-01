@@ -36,6 +36,7 @@ def main() -> int:
     print(f"permissions: {', '.join(result.permissions) or '-'}")
     print(f"missing    : {', '.join(result.missing) or '-'}")
     print(f"forbidden  : {', '.join(result.forbidden) or '-'}")
+    print(f"unnecessary: {', '.join(result.unnecessary) or '-'}  (recommended off, not refused)")
     print(f"ip allowed : {', '.join(result.ip_allowlist) or 'any address'}")
     return 0 if result.accepted else 1
 

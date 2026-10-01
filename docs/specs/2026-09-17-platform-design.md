@@ -192,6 +192,13 @@ permission is ever enabled.
 
 A key that fails this contract is **rejected**. It is never stored.
 
+Any other permission the key holds is **unnecessary**: the platform never uses it.
+Project 1 places market orders only, so it never cancels one (§9.1), and it opens no
+WebSocket. Unnecessary permissions are named in the answer, accepted or not, with the
+recommendation to turn them off; they are never a reason to refuse. A stolen key should
+be able to do as little as possible, but refusing a working key over a read permission
+would only be friction.
+
 The response also carries `ipAllowlist`; the platform surfaces it so the user can
 restrict the key to the server's address.
 

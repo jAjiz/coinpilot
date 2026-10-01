@@ -51,6 +51,9 @@ def validate_key(client) -> KeyValidation:
     granted = frozenset(str(entry) for entry in info.get("permissions", []))
     missing = tuple(sorted(REQUIRED_PERMISSIONS - granted))
     forbidden = tuple(sorted(FORBIDDEN_PERMISSIONS & granted))
+    # Not a reason to refuse: the key works. Named so the user can shrink what a stolen
+    # copy could do.
+    unnecessary = tuple(sorted(granted - REQUIRED_PERMISSIONS - FORBIDDEN_PERMISSIONS))
 
     # Both facts are returned; the one named as the reason is the security one. A key that
     # can withdraw is a different kind of problem from a key that is merely incomplete.
@@ -68,4 +71,5 @@ def validate_key(client) -> KeyValidation:
         missing=missing,
         forbidden=forbidden,
         ip_allowlist=tuple(str(entry) for entry in info.get("ipAllowlist", [])),
+        unnecessary=unnecessary,
     )

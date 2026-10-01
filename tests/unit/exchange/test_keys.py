@@ -41,6 +41,26 @@ def test_a_harmless_extra_permission_does_not_matter():
     assert result.accepted is True
 
 
+def test_a_permission_the_platform_never_uses_is_named_so_it_can_be_turned_off():
+    """Accepted, and named: a stolen key should be able to do as little as possible."""
+    result = validate_key(FakeClient(_info([*ENOUGH, "query-ledger", "close-trades"])))
+
+    assert result.accepted is True
+    assert result.unnecessary == ("close-trades", "query-ledger")
+
+
+def test_a_key_with_exactly_what_is_needed_has_nothing_unnecessary():
+    assert validate_key(FakeClient(_info(ENOUGH))).unnecessary == ()
+
+
+def test_a_refused_key_still_names_what_it_does_not_need():
+    """One trip to Kraken's key screen fixes both: add what is missing, remove the rest."""
+    result = validate_key(FakeClient(_info(["query-funds", "export-data", "withdraw-funds"])))
+
+    assert result.accepted is False
+    assert result.unnecessary == ("export-data",)
+
+
 def test_a_key_missing_a_required_permission_is_refused_and_says_which():
     result = validate_key(FakeClient(_info(["query-funds", "modify-trades"])))
 
