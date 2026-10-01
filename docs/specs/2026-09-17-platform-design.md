@@ -297,8 +297,8 @@ An asset whose drift is below `min_drift_pct` produces no leg.
 
 A leg below its **effective minimum** is dropped before anything is sent. The effective
 minimum is the larger of `min_order_fiat` and Kraken's own minimum for the leg's pair at
-the current price, `max(costmin, ordermin × price)`. The engine applies `min_order_fiat`;
-the executor, which holds each pair's metadata, applies Kraken's.
+the current price, `max(costmin, ordermin × price)`. The executor, which holds each
+pair's metadata, applies both at once, so every dropped leg is logged with its reason.
 
 Kraken's minimum moves with the price and differs per pair, so it is computed when an
 order is about to be placed and never validated when a setting is saved: a value valid
@@ -379,7 +379,8 @@ The protocol:
 |---|---|---|
 | A txid | The order exists | Adopt it and read its fill (§9.5) |
 | `None` | The lookup itself failed | Still unknown: stay `PENDING`, skip this user's evaluation, count toward the failure streak |
-| Answered, absent | Genuine absence | Mark `FAILED`; the next plan retries naturally |
+| Answered, absent, and the attempt is older than two minutes | Genuine absence | Mark `FAILED`; the next plan retries naturally |
+| Answered, absent, sooner than that | Not yet evidence | Stay `PENDING`: Kraken may not list an order it has just accepted, and failing it would let the next plan buy again |
 
 **A lookup failure is "unknown", never "absent."** The two readings differ by a duplicate
 order.
