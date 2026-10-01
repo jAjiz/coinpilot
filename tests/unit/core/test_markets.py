@@ -19,6 +19,7 @@ def _pair(name, base, quote, status="online"):
         order_min=Decimal("0.0001"),
         cost_min=Decimal("0.5"),
         status=status,
+        cost_decimals=5,
     )
 
 

@@ -26,6 +26,7 @@ ASSET_PAIRS = {
         "ordermin": "0.00005",
         "costmin": "5",
         "status": "online",
+        "cost_decimals": 5,
     }
 }
 
@@ -330,3 +331,9 @@ def test_an_asset_with_no_short_name_is_skipped():
 
 def test_asset_names_are_none_when_kraken_cannot_be_read():
     assert _client(lambda request: httpx.Response(503)).assets() is None
+
+
+def test_a_pair_carries_its_cost_precision():
+    client = _client(lambda request: _ok(ASSET_PAIRS))
+
+    assert client.asset_pairs()["XXBTZEUR"].cost_decimals == 5

@@ -5,6 +5,8 @@ import pytest
 from exchange.precision import (
     format_decimal,
     is_orderable,
+    minimum_fiat,
+    round_cost,
     round_price,
     round_volume,
     volume_from_fiat,
@@ -23,6 +25,7 @@ BTC = PairMeta(
     order_min=D("0.00005"),
     cost_min=D("5"),
     status="online",
+    cost_decimals=5,
 )
 
 # A pair whose price is a fraction of a cent. A rounding rule taken from a constant
@@ -37,6 +40,7 @@ CHEAP = PairMeta(
     order_min=D("20"),
     cost_min=D("5"),
     status="online",
+    cost_decimals=5,
 )
 
 
@@ -115,7 +119,27 @@ def test_a_pair_that_is_not_online_is_not_tradable():
         order_min=D("0.00005"),
         cost_min=D("5"),
         status="cancel_only",
+        cost_decimals=5,
     )
 
     assert BTC.tradable is True
     assert frozen.tradable is False
+
+
+def test_a_fiat_amount_is_rounded_down_to_the_pairs_cost_precision():
+    """Down, like a volume: up would spend more than the plan allocated."""
+    assert round_cost(BTC, D("33.333333333333")) == D("33.33333")
+
+
+def test_an_amount_already_within_the_precision_is_unchanged():
+    assert round_cost(BTC, D("600")) == D("600")
+
+
+def test_the_minimum_is_the_cost_minimum_when_the_volume_minimum_is_cheaper():
+    # 0.00005 BTC at 50 000 is 2.5, under the 5 cost minimum.
+    assert minimum_fiat(BTC, D("50000")) == D("5")
+
+
+def test_the_minimum_follows_the_price_when_the_volume_minimum_is_dearer():
+    # 0.00005 BTC at 200 000 is 10.
+    assert minimum_fiat(BTC, D("200000")) == D("10")

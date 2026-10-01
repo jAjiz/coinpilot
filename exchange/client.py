@@ -214,6 +214,7 @@ class KrakenClient:
                     order_min=Decimal(str(entry["ordermin"])),
                     cost_min=Decimal(str(entry["costmin"])),
                     status=str(entry["status"]),
+                    cost_decimals=int(entry["cost_decimals"]),
                 )
             except (KeyError, TypeError, ValueError, InvalidOperation):
                 logger.warning("skipping unreadable asset pair %s", name)

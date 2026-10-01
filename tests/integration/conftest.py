@@ -113,6 +113,7 @@ def _raw_pair(altname, base, quote, status="online"):
         "lot_decimals": 8,
         "ordermin": "0.0001",
         "costmin": "0.5",
+        "cost_decimals": 5,
         "status": status,
     }
 

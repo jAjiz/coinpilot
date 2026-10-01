@@ -42,6 +42,8 @@ class PairMeta:
     order_min: Decimal
     cost_min: Decimal
     status: str
+    # Decimal places of an amount in the quote currency. A buy in fiat is rounded to it.
+    cost_decimals: int
 
     @property
     def tradable(self) -> bool:
