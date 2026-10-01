@@ -15,6 +15,7 @@ import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 
 import httpx
@@ -140,6 +141,19 @@ class FakeKraken:
         self.balance = {}
         self.prices = {"XXBTZEUR": "50000", "XETHZEUR": "2500", "SOLEUR": "100"}
         self.calls = []
+        # Orders Kraken knows, by txid, as Kraken reports them.
+        self.orders = {}
+        # Every AddOrder form, validated ones included.
+        self.placed = []
+        # The error list the next AddOrder answers with. Empty: it is accepted.
+        self.add_order_errors = []
+        # None: answer normally. "dropped": fail the HTTP answer and execute nothing.
+        # "executed": execute the order, then fail the HTTP answer — the lost response.
+        self.lose_add_order = None
+        # The status a new order is reported with when it is read.
+        self.fill_status = "closed"
+        # Called with each AddOrder form, before Kraken acts on it.
+        self.on_add_order = None
 
     def __call__(self, request):
         endpoint = request.url.path.rsplit("/", 1)[-1]
@@ -161,7 +175,52 @@ class FakeKraken:
         if endpoint == "Ticker":
             wanted = request.url.params.get("pair", "").split(",")
             return _ok({pair: {"c": [self.prices[pair], "1"]} for pair in wanted if pair in self.prices})
+        if endpoint == "AddOrder":
+            return self._add_order(dict(urllib.parse.parse_qsl(request.content.decode())))
+        if endpoint == "QueryOrders":
+            txid = dict(urllib.parse.parse_qsl(request.content.decode())).get("txid")
+            if txid not in self.orders:
+                return httpx.Response(200, json={"error": ["EOrder:Invalid order"], "result": {}})
+            return _ok({txid: self.orders[txid]})
+        if endpoint in ("OpenOrders", "ClosedOrders"):
+            wanted = dict(urllib.parse.parse_qsl(request.content.decode())).get("cl_ord_id")
+            is_open = endpoint == "OpenOrders"
+            found = {
+                txid: order
+                for txid, order in self.orders.items()
+                if (order["status"] in ("open", "pending")) == is_open
+                and (wanted is None or order["cl_ord_id"] == wanted)
+            }
+            return _ok({"open" if is_open else "closed": found})
         return httpx.Response(404)
+
+    def _add_order(self, form):
+        self.placed.append(form)
+        if self.on_add_order is not None:
+            self.on_add_order(form)
+        if self.add_order_errors:
+            return httpx.Response(200, json={"error": self.add_order_errors, "result": {}})
+        if form.get("validate") == "true":
+            return _ok({"descr": {"order": f"buy {form['volume']} {form['pair']} @ market"}})
+        if self.lose_add_order == "dropped":
+            return httpx.Response(503)
+        txid = f"OTX{len(self.orders) + 1:03d}-AAAAA-BBBBBB"
+        spent = Decimal(form["volume"])
+        price = Decimal(self.prices[form["pair"]])
+        filled = self.fill_status == "closed"
+        self.orders[txid] = {
+            "status": self.fill_status,
+            "cl_ord_id": form["cl_ord_id"],
+            "oflags": form.get("oflags", ""),
+            "vol": form["volume"],
+            "vol_exec": str((spent / price).quantize(Decimal("0.00000001"))) if filled else "0",
+            "cost": str(spent) if filled else "0",
+            "fee": str((spent * Decimal("0.004") / price).quantize(Decimal("0.00000001"))) if filled else "0",
+            "price": str(price) if filled else "0",
+        }
+        if self.lose_add_order == "executed":
+            return httpx.Response(503)
+        return _ok({"descr": {"order": f"buy {form['volume']} {form['pair']} @ market"}, "txid": [txid]})
 
 
 class FakeGoogle:
