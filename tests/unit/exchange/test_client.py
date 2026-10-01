@@ -1,12 +1,13 @@
 import logging
 from decimal import Decimal
+from urllib.parse import parse_qs
 
 import httpx
 import pytest
 
 from exchange.client import KeyLockedOut, KeyRefused, KrakenClient, MissingCredentials, build_http_client
 from exchange.limits import KeyLimiter
-from exchange.types import Credentials
+from exchange.types import Credentials, Placement, PlacementOutcome
 
 D = Decimal
 
@@ -167,7 +168,8 @@ def test_an_order_is_a_market_order_and_carries_its_client_id():
     assert "volume=0.00212765" in seen["body"]
     assert "cl_ord_id=abc123" in seen["body"]
     assert "price=" not in seen["body"]
-    assert result["txid"] == ["OABCDE-12345-XYZ"]
+    assert "oflags=" not in seen["body"]
+    assert result == Placement(PlacementOutcome.SENT, txid="OABCDE-12345-XYZ")
 
 
 def test_a_tiny_volume_is_sent_in_full_not_in_scientific_notation():
@@ -183,17 +185,20 @@ def test_a_tiny_volume_is_sent_in_full_not_in_scientific_notation():
     assert "volume=0.00000001" in seen["body"]
 
 
-def test_a_validate_only_order_says_so():
+def test_a_validate_only_order_says_so_and_is_never_sent():
     """No integration test places a real order. This is how that rule is kept."""
     seen = {}
 
     def handler(request):
         seen["body"] = request.content.decode()
-        return _ok({})
+        return _ok({"descr": {"order": "buy 100 XBTEUR @ market"}})
 
-    _client(handler).add_order(pair="XXBTZEUR", side="buy", volume=D("1"), cl_ord_id="abc123", validate=True)
+    result = _client(handler).add_order(
+        pair="XXBTZEUR", side="buy", volume=D("1"), cl_ord_id="abc123", validate=True
+    )
 
     assert "validate=true" in seen["body"]
+    assert result == Placement(PlacementOutcome.VALIDATED)
 
 
 def test_open_orders_can_be_filtered_by_client_id():
@@ -337,3 +342,104 @@ def test_a_pair_carries_its_cost_precision():
     client = _client(lambda request: _ok(ASSET_PAIRS))
 
     assert client.asset_pairs()["XXBTZEUR"].cost_decimals == 5
+
+
+def _order_with(answer):
+    return _client(lambda request: answer).add_order(
+        pair="XXBTZEUR", side="buy", volume=D("100"), cl_ord_id="abc123", in_quote=True
+    )
+
+
+def test_a_buy_in_fiat_names_its_amount_in_the_quote_currency_and_its_fee_in_the_base():
+    seen = {}
+
+    def handler(request):
+        seen["form"] = parse_qs(request.content.decode())
+        return _ok({"txid": ["OTX"]})
+
+    _client(handler).add_order(
+        pair="XXBTZEUR", side="buy", volume=D("100.00000"), cl_ord_id="abc123", in_quote=True
+    )
+
+    assert seen["form"]["oflags"] == ["viqc,fcib"]
+    assert seen["form"]["volume"] == ["100.00000"]
+
+
+def test_kraken_takes_an_amount_in_fiat_for_buys_only():
+    with pytest.raises(ValueError):
+        _client(lambda request: _ok({})).add_order(
+            pair="XXBTZEUR", side="sell", volume=D("1"), cl_ord_id="abc123", in_quote=True
+        )
+
+
+@pytest.mark.parametrize(
+    "error",
+    ["EOrder:Insufficient funds", "EGeneral:Invalid arguments:volume", "EService:Market in cancel_only mode"],
+)
+def test_a_definitive_refusal_is_refused_with_krakens_code(error):
+    result = _order_with(httpx.Response(200, json={"error": [error], "result": {}}))
+
+    assert result == Placement(PlacementOutcome.REFUSED, error=error)
+
+
+@pytest.mark.parametrize(
+    "errors",
+    [["EService:Unavailable"], ["EService:Busy"], ["EGeneral:Internal error"], ["EBrandNew:Never seen"]],
+)
+def test_any_other_code_is_unknown(errors):
+    result = _order_with(httpx.Response(200, json={"error": errors, "result": {}}))
+
+    assert result == Placement(PlacementOutcome.UNKNOWN)
+
+
+def test_a_server_error_is_unknown():
+    assert _order_with(httpx.Response(502)).outcome is PlacementOutcome.UNKNOWN
+
+
+def test_a_timeout_is_unknown():
+    def handler(request):
+        raise httpx.ReadTimeout("timed out")
+
+    result = _client(handler).add_order(
+        pair="XXBTZEUR", side="buy", volume=D("100"), cl_ord_id="abc123", in_quote=True
+    )
+
+    assert result.outcome is PlacementOutcome.UNKNOWN
+
+
+def test_an_answer_that_is_not_json_is_unknown():
+    assert _order_with(httpx.Response(200, content=b"<html>")).outcome is PlacementOutcome.UNKNOWN
+
+
+def test_an_answer_with_no_txid_is_unknown():
+    """Kraken said nothing went wrong and named no order. That is not evidence of absence."""
+    assert _order_with(_ok({"descr": {}})).outcome is PlacementOutcome.UNKNOWN
+
+
+def test_a_secret_that_does_not_decode_sends_nothing_and_is_refused():
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return _ok({"txid": ["OTX"]})
+
+    client = _client(handler, credentials=Credentials(api_key="K", api_secret="not base64 at all!"))
+    result = client.add_order(pair="XXBTZEUR", side="buy", volume=D("100"), cl_ord_id="abc123", in_quote=True)
+
+    assert calls == []
+    assert result.outcome is PlacementOutcome.REFUSED
+
+
+def test_an_order_on_a_client_with_no_key_is_a_programming_error():
+    client = _client(lambda request: _ok({}), credentials=None)
+
+    with pytest.raises(MissingCredentials):
+        client.add_order(pair="XXBTZEUR", side="buy", volume=D("100"), cl_ord_id="abc123")
+
+
+def test_a_refused_order_is_logged_without_the_key(caplog):
+    with caplog.at_level(logging.DEBUG, logger="coinpilot.exchange"):
+        _order_with(httpx.Response(200, json={"error": ["EOrder:Insufficient funds"], "result": {}}))
+
+    assert "Insufficient funds" in caplog.text
+    assert CREDENTIALS.api_key not in caplog.text

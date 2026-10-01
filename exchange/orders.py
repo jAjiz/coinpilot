@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from decimal import Decimal, InvalidOperation
 
 from exchange.types import ExchangeOrderStatus, OrderLookup
@@ -107,3 +107,24 @@ def find_order_by_cl_ord_id(client, cl_ord_id: str) -> OrderLookup | None:
         unresolved = True
 
     return None if unresolved else ABSENT
+
+
+# Spec §9.4. Closed on purpose: a code not listed here, including one Kraken adds later,
+# reads as unknown. Reading a new code as a refusal is how a duplicate order happens.
+DEFINITIVE_REFUSALS = (
+    "EOrder:",
+    "EGeneral:Invalid arguments",
+    "EGeneral:Permission denied",
+    "EAPI:",
+    "EService:Market in cancel_only mode",
+    "EService:Market in post_only mode",
+    "EService:Market in limit_only mode",
+)
+
+
+def is_definitive_refusal(errors: Sequence[str]) -> bool:
+    """Every code Kraken returned says the order was not accepted.
+
+    One code that does not is enough to make the answer unknown, and so is no code at all.
+    """
+    return bool(errors) and all(str(error).startswith(DEFINITIVE_REFUSALS) for error in errors)

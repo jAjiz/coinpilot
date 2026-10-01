@@ -1,6 +1,8 @@
 from decimal import Decimal
 
-from exchange.orders import find_order_by_cl_ord_id
+import pytest
+
+from exchange.orders import find_order_by_cl_ord_id, is_definitive_refusal
 from exchange.types import ExchangeOrderStatus
 
 D = Decimal
@@ -137,3 +139,37 @@ def test_a_field_kraken_omits_reads_as_zero_rather_than_crashing():
 
     assert found.volume == D("0")
     assert found.fee == D("0")
+
+
+@pytest.mark.parametrize(
+    "errors",
+    [
+        ["EOrder:Insufficient funds"],
+        ["EOrder:Order minimum not met"],
+        ["EGeneral:Invalid arguments:volume"],
+        ["EGeneral:Permission denied"],
+        ["EAPI:Invalid nonce"],
+        ["EService:Market in cancel_only mode"],
+        ["EService:Market in post_only mode"],
+        ["EService:Market in limit_only mode"],
+    ],
+)
+def test_a_listed_code_is_a_definitive_refusal(errors):
+    assert is_definitive_refusal(errors) is True
+
+
+@pytest.mark.parametrize(
+    "errors",
+    [
+        [],
+        ["EService:Unavailable"],
+        ["EService:Busy"],
+        ["EGeneral:Internal error"],
+        ["EBrandNew:A code nobody has seen"],
+        # One ambiguous code is enough to make the whole answer unknown.
+        ["EOrder:Insufficient funds", "EService:Busy"],
+    ],
+)
+def test_anything_else_is_not(errors):
+    """The list is closed. Reading a new code as a refusal is how a duplicate happens."""
+    assert is_definitive_refusal(errors) is False

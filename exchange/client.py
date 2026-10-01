@@ -16,9 +16,10 @@ from decimal import Decimal, InvalidOperation
 import httpx
 
 from exchange.limits import PUBLIC_BUCKET, KeyLimiter
+from exchange.orders import is_definitive_refusal
 from exchange.precision import format_decimal
 from exchange.signing import encode_body, sign
-from exchange.types import Credentials, PairMeta
+from exchange.types import Credentials, PairMeta, Placement, PlacementOutcome
 
 logger = logging.getLogger("coinpilot.exchange")
 
@@ -51,6 +52,10 @@ class KeyLockedOut(Exception):
 
     Raised, like `KeyRefused`, only where the caller asked to tell it apart.
     """
+
+
+class SecretUnreadable(Exception):
+    """The secret is not base64, so no request could be signed, and none was sent."""
 
 
 _LOCKOUT_ERROR = "EGeneral:Temporary lockout"
@@ -117,6 +122,29 @@ class KrakenClient:
 
         return self._safely(call, endpoint)
 
+    def _call_private(self, endpoint: str, payload: Mapping[str, str] | None = None) -> dict:
+        """One signed call. Raises on every failure; the callers decide what each means."""
+        credentials = self._credentials
+        if credentials is None:
+            raise MissingCredentials(endpoint)
+        path = f"/0/private/{endpoint}"
+        self._limiter.wait_turn(credentials.api_key)
+        nonce = self._limiter.next_nonce(credentials.api_key)
+        body = encode_body({"nonce": nonce, **dict(payload or {})})
+        try:
+            signature = sign(path, nonce, body, credentials.api_secret)
+        except ValueError:
+            # Kraken issues base64 secrets, so one that does not decode was mistyped.
+            raise SecretUnreadable(endpoint) from None
+        headers = {
+            "API-Key": credentials.api_key,
+            "API-Sign": signature,
+            "Content-Type": "application/x-www-form-urlencoded",
+        }
+        response = self._http.post(path, content=body, headers=headers)
+        response.raise_for_status()
+        return self._unwrap(response.json())
+
     def _private(
         self,
         endpoint: str,
@@ -124,32 +152,9 @@ class KrakenClient:
         *,
         refusals: bool = False,
     ) -> dict | None:
-        credentials = self._credentials
-        if credentials is None:
+        if self._credentials is None:
             raise MissingCredentials(endpoint)
-        path = f"/0/private/{endpoint}"
-
-        def call() -> dict:
-            self._limiter.wait_turn(credentials.api_key)
-            nonce = self._limiter.next_nonce(credentials.api_key)
-            body = encode_body({"nonce": nonce, **dict(payload or {})})
-            try:
-                signature = sign(path, nonce, body, credentials.api_secret)
-            except ValueError:
-                # Kraken issues base64 secrets, so one that does not decode was mistyped.
-                if refusals:
-                    raise KeyRefused(endpoint) from None
-                raise
-            headers = {
-                "API-Key": credentials.api_key,
-                "API-Sign": signature,
-                "Content-Type": "application/x-www-form-urlencoded",
-            }
-            response = self._http.post(path, content=body, headers=headers)
-            response.raise_for_status()
-            return self._unwrap(response.json())
-
-        return self._safely(call, endpoint, refusals=refusals)
+        return self._safely(lambda: self._call_private(endpoint, payload), endpoint, refusals=refusals)
 
     @staticmethod
     def _unwrap(payload: dict) -> dict:
@@ -161,9 +166,12 @@ class KrakenClient:
     def _safely(self, call: Callable[[], dict], endpoint: str, *, refusals: bool = False) -> dict | None:
         try:
             return call()
-        except KeyRefused:
-            logger.warning("kraken %s refused the key", endpoint)
-            raise
+        except SecretUnreadable:
+            if refusals:
+                logger.warning("kraken %s refused the key", endpoint)
+                raise KeyRefused(endpoint) from None
+            logger.warning("kraken %s failed: the secret does not decode", endpoint)
+            return None
         except KrakenError as exc:
             if refusals and _is_refusal(exc.errors):
                 logger.warning("kraken %s refused the key", endpoint)
@@ -271,14 +279,22 @@ class KrakenClient:
         side: str,
         volume: Decimal,
         cl_ord_id: str,
+        *,
+        in_quote: bool = False,
         validate: bool = False,
-    ) -> dict | None:
-        """A market order, always.
+    ) -> Placement:
+        """A market order, always, and what became of the request.
 
-        There is no price and no order that rests between ticks, so there is nothing to
-        reprice, nothing to cancel and no order state machine. `validate=True` has Kraken
-        check the order and never send it to the matching engine.
+        `in_quote=True` makes `volume` an amount of the quote currency and takes the fee
+        in the asset bought (`viqc`, `fcib`), so the order spends exactly that amount
+        (spec §9.1). Kraken accepts it on buys only. `validate=True` has Kraken check the
+        order and never trade it.
+
+        Never `None`. This is the one call where *Kraken refused* and *nobody knows* must be
+        told apart: the first leaves nothing at Kraken, the second may have bought (§9.4).
         """
+        if in_quote and side != "buy":
+            raise ValueError("kraken takes an amount in the quote currency for buys only")
         payload = {
             "pair": pair,
             "type": side,
@@ -286,9 +302,35 @@ class KrakenClient:
             "volume": format_decimal(volume),
             "cl_ord_id": cl_ord_id,
         }
+        if in_quote:
+            payload["oflags"] = "viqc,fcib"
         if validate:
             payload["validate"] = "true"
-        return self._private("AddOrder", payload)
+
+        try:
+            result = self._call_private("AddOrder", payload)
+        except MissingCredentials:
+            raise
+        except SecretUnreadable:
+            logger.warning("kraken AddOrder not sent: the secret does not decode")
+            return Placement(PlacementOutcome.REFUSED, error="the secret does not decode")
+        except KrakenError as exc:
+            if is_definitive_refusal(exc.errors):
+                logger.warning("kraken AddOrder refused: %s", self._redact(", ".join(exc.errors)))
+                return Placement(PlacementOutcome.REFUSED, error=str(exc.errors[0]))
+            logger.warning("kraken AddOrder answer unknown: %s", self._redact(str(exc)))
+            return Placement(PlacementOutcome.UNKNOWN)
+        except Exception as exc:
+            logger.warning("kraken AddOrder answer unknown: %s", self._redact(str(exc)))
+            return Placement(PlacementOutcome.UNKNOWN)
+
+        if validate:
+            return Placement(PlacementOutcome.VALIDATED)
+        txids = result.get("txid") if isinstance(result, dict) else None
+        if isinstance(txids, list) and txids:
+            return Placement(PlacementOutcome.SENT, txid=str(txids[0]))
+        logger.warning("kraken AddOrder answered with no txid")
+        return Placement(PlacementOutcome.UNKNOWN)
 
     def open_orders(self, cl_ord_id: str | None = None) -> dict[str, dict] | None:
         raw = self._private("OpenOrders", {"cl_ord_id": cl_ord_id} if cl_ord_id else None)
