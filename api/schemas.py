@@ -175,6 +175,8 @@ class OrderOut(BaseModel):
     executed_volume: Decimal | None
     executed_price: Decimal | None
     fee: Decimal | None
+    cost: Decimal | None
+    error: str | None
     created_at: datetime
 
 

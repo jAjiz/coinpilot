@@ -109,7 +109,8 @@ class UserSettings(TimestampMixin, Base):
     )
     fiat: Mapped[str] = mapped_column(String(8), nullable=False)
 
-    invest_cash_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Off: configuring weights to look at a portfolio must not start spending (spec §3.4).
+    invest_cash_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # True selects the engine's REDUCE_DRIFT cash policy; false selects PRORATA.
     cash_rebalance_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     auto_rebalance_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -195,6 +196,16 @@ class Order(TimestampMixin, Base):
     executed_volume: Mapped[Decimal | None] = mapped_column(AMOUNT, nullable=True)
     executed_price: Mapped[Decimal | None] = mapped_column(AMOUNT, nullable=True)
     fee: Mapped[Decimal | None] = mapped_column(AMOUNT, nullable=True)
+    # What Kraken reports the order cost, unconverted. With a buy in fiat it should equal
+    # `requested_fiat`, and storing it is how that is checked rather than assumed.
+    cost: Mapped[Decimal | None] = mapped_column(AMOUNT, nullable=True)
+    # Kraken's code, when it refused the order. A `FAILED` row with no code was an absence.
+    error: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # The executor's clock, not `created_at`: the grace before an absence is believed is
+    # counted on it (core/settlement.py).
+    attempted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
 
     __table_args__ = (
         enum_check("side", Side, "ck_orders_side"),
