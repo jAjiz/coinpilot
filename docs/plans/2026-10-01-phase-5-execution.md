@@ -2958,3 +2958,15 @@ shows one evaluation, `DONE`, with a line per leg.
 
 - **An investment within two minutes of a lost answer is refused as unresolved.** That
   grace period is what stops a lost answer from turning into a second buy.
+
+---
+
+## Departures taken during execution
+
+The code blocks above are the plan as written. Where the repository differs, trust the
+repository.
+
+| Where | What changed | Why |
+|---|---|---|
+| `core/db/models.py`, migration `8b8c04912293` | `sessions.status` widened from 16 to 32 characters | `KRAKEN_UNAVAILABLE` is 18 characters. The test of an unreadable balance failed on the insert; the plan had not checked the column. |
+| `api/routes/invest.py` | The `409` for an unresolved order and the `503` for an unreadable Kraken are returned as a `JSONResponse`, not raised | Both are evaluations that ran and were recorded. Raising rolls back the request's transaction; in the tests, which nest every transaction in one, that erased the evaluation's record. The route no longer depends on the two being separate. `test_kraken_down_is_a_503_and_nothing_is_sent` now also checks the evaluation is recorded. |
