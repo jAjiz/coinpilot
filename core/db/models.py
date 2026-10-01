@@ -196,8 +196,8 @@ class Order(TimestampMixin, Base):
     executed_volume: Mapped[Decimal | None] = mapped_column(AMOUNT, nullable=True)
     executed_price: Mapped[Decimal | None] = mapped_column(AMOUNT, nullable=True)
     fee: Mapped[Decimal | None] = mapped_column(AMOUNT, nullable=True)
-    # What Kraken reports the order cost, unconverted. With a buy in fiat it should equal
-    # `requested_fiat`, and storing it is how that is checked rather than assumed.
+    # In fiat, as Kraken reports it. A buy in fiat costs exactly `requested_fiat` (§9.1).
+    # `fee` is in fiat too, although `fcib` takes it in the asset; `executed_volume` is gross.
     cost: Mapped[Decimal | None] = mapped_column(AMOUNT, nullable=True)
     # Kraken's code, when it refused the order. A `FAILED` row with no code was an absence.
     error: Mapped[str | None] = mapped_column(String(64), nullable=True)

@@ -82,8 +82,7 @@ class OrderLookup:
     volume_executed: Decimal
     price: Decimal
     fee: Decimal
-    # As Kraken reports it. Whether a buy in fiat reports it in the quote currency is
-    # verified on the first real order (phase 5 plan).
+    # In the quote currency, a buy in fiat included (verified on a real order, spec §9.1).
     cost: Decimal
 
 
