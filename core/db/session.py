@@ -17,13 +17,23 @@ _engine: Engine | None = None
 _factory: sessionmaker[Session] | None = None
 
 
+# How long opening a connection may take, not how long a query may run. psycopg's own
+# default is 130 s, and every request waited that long on a database that was down.
+CONNECT_TIMEOUT_SECONDS = 5
+
+
 def create_engine_from_url(url: str) -> Engine:
     """Build an engine.
 
     `pool_pre_ping` costs one round trip and survives a dropped connection, which a
     long-lived scheduler process will meet.
     """
-    return create_engine(url, pool_pre_ping=True, future=True)
+    return create_engine(
+        url,
+        pool_pre_ping=True,
+        future=True,
+        connect_args={"connect_timeout": CONNECT_TIMEOUT_SECONDS},
+    )
 
 
 def configure(url: str) -> None:

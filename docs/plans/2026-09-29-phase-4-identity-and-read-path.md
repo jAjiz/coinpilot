@@ -5285,3 +5285,41 @@ Then sign in again in the browser, and use `POST /auth/logout` there. `/auth/me`
   logout cannot reach it. Section §15 says so, and a test pins it.
 - **Assets use Kraken's short names.** `XBT`, not `BTC`. The project 2 application is the
   natural place to translate for people; this API stays exact.
+
+---
+
+## Departures taken during execution
+
+The code blocks above are the plan as written. Where the repository differs, trust the
+repository.
+
+| Where | What changed | Why |
+|---|---|---|
+| `tests/unit/core/test_tokens.py` | A `_claims` helper builds the claims of the forged tokens | Keeps the lines under 110 characters. No assertion changed. |
+| `tests/unit/core/test_reading.py` | `FakePublic` defaults to a `DEFAULT` marker, not `None` | The fake used `None` both for "use the default" and for "the read failed", so the `prices` and `asset pairs` cases could never fail. The production code was right; the test was not testing it. |
+| `api/schemas.py`, `api/routes/portfolio.py` | `total_value` and `cash` are plain decimal strings, written like the amounts inside `holdings` | `POST /portfolio/refresh` returned `"100"` and `GET /portfolio` returned `"100.000000000000"` for one amount: the column keeps twelve places. A client now sees one amount written one way. |
+| `docs/specs/2026-09-17-platform-design.md` | One run-on sentence of the §5.1 text split in two | Wording only. |
+| `core/tokens.py`, `api/main.py` | `TokenSigner` checks `exp` on its own clock, and the entry point hands it the context's clock | PyJWT checked expiry on the machine's clock while tokens were issued on the injected one: the application ran on two clocks. |
+| `core/catalog.py`, `api/routes/assets.py` | Kraken's asset names and pairs come from a `MarketCatalog` read at most once a day; `PUT /assets` locks the settings row only after reading it | The plan locked the row, then made two public calls. Every public call shares one bucket paced at a call a second, so users queued behind each other holding a lock and a connection. |
+| `api/routes/assets.py` | `DELETE /assets/{asset}` accepts the names `PUT` accepts | `PUT /assets/XXBT` stored `XBT`, and `DELETE /assets/XXBT` answered 404. |
+| `core/google.py` | A Google answer that is not a JSON object fails the login | `.get()` on a list raised `AttributeError`, a 500 instead of a 400. |
+| `exchange/client.py`, `exchange/keys.py`, `api/routes/credentials.py` | `EGeneral:Temporary lockout` is `KeyRejection.LOCKED_OUT`, a 429 that says to wait | It was reported as an outage, which invites the retries that keep the lockout going. |
+| `core/db/session.py`, `api/app.py` | Opening a connection gives up after 5 s, and an unreachable database answers 503 | Found during the manual check: with Docker stopped, the Google callback hung for psycopg's default 130 s and then answered a bare 500. |
+| `exchange/keys.py`, `api/routes/credentials.py`, `scripts/check_key.py`, spec §5.2 | A key's permissions beyond the contract are returned as `unnecessary`, with the advice to turn them off; never a reason to refuse | Asked for during the manual check. A stolen key should be able to do as little as possible. |
+| `core/portfolio.py`, `api/routes/portfolio.py` | Every amount in a snapshot's `holdings` is written without padding, through one `plain_amount` | Found during the manual check: `value` read `3594.150550803000000`, the padding of Kraken's price and amount multiplied. `total_value` and `cash` had been fixed alone. |
+
+Found in review and left for later:
+
+- **`KeyLimiter` keeps an entry for every key it has seen**, including every wrong key
+  sent to `POST /credentials`. The web process's memory grows with them until it restarts.
+  Evicting idle keys belongs with the production hardening of phase 8.
+- **New settings invest cash by default.** `invest_cash_enabled` defaults to `true` and
+  `min_order_fiat` to `0`. Nothing acts on it yet, but once the scheduler runs (phase 7) any
+  fiat a user deposits is invested without their having chosen it. Decide when planning
+  phase 5: the proposal is a `false` default, so investing is opted into.
+- **Logging is not production-ready** (phase 8). uvicorn's access log records the whole
+  callback URL, Google's single-use `code` included; it is spent by then, but the line
+  should not be kept as is. The application configures no `logging`, so its own warnings
+  reach stderr with no level, logger or time.
+- **Two refreshes with the same token end the sign-in** and **expired refresh tokens are
+  not deleted**: both already listed under *What this phase deliberately leaves out*.

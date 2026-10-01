@@ -20,6 +20,7 @@ EXPECTED_TABLES = frozenset(
         "proposal",
         "portfolio_snapshots",
         "sessions",
+        "refresh_tokens",
     }
 )
 

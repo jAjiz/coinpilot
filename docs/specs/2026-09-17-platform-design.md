@@ -162,6 +162,16 @@ Multi-tenancy makes authentication a project 1 requirement, not a project 2 one 
 shared static token identifies nobody, and without identity there is no way to decide
 whose portfolio a caller may see.
 
+The provider is Google. A sign-in returns two tokens. The **access token** is a JWT that
+lives 15 minutes and carries the user id and nothing personal. The **refresh token** is a
+random value the server stores only as a SHA-256, and it is good for one use. Every
+refresh issues the next token in the same *family*. A sign-in lasts 30 days from the
+Google login, and refreshing never extends it. A used token presented again revokes the
+whole family, because the server cannot tell the owner from the thief. Logout revokes the
+family. An application sends both tokens in the body and the bearer header; a browser
+receives them as `HttpOnly` cookies, the refresh cookie `SameSite=Strict` and scoped to
+`/auth`.
+
 ### 5.2 Kraken key validation
 
 `GetApiKeyInfo` returns the key's `permissions` array and **requires no permission to
@@ -181,6 +191,13 @@ their own: staging an address is the step before a withdrawal, if the withdrawal
 permission is ever enabled.
 
 A key that fails this contract is **rejected**. It is never stored.
+
+Any other permission the key holds is **unnecessary**: the platform never uses it.
+Project 1 places market orders only, so it never cancels one (§9.1), and it opens no
+WebSocket. Unnecessary permissions are named in the answer, accepted or not, with the
+recommendation to turn them off; they are never a reason to refuse. A stolen key should
+be able to do as little as possible, but refusing a working key over a read permission
+would only be friction.
 
 The response also carries `ipAllowlist`; the platform surfaces it so the user can
 restrict the key to the server's address.
@@ -212,6 +229,7 @@ Every table carries `user_id`. There are no singleton rows.
 | Table | Contents |
 |---|---|
 | `users` | OAuth identity: provider, subject, email, status. UUID primary key, so row counts are not leaked. |
+| `refresh_tokens` | One row per refresh token: SHA-256, family, expiry, used and revoked timestamps. Expired rows are deleted by retention. |
 | `user_credentials` | Encrypted Kraken key and secret, nonce, master-key version, validation timestamp. |
 | `user_settings` | One row per user: `fiat`, `invest_cash_enabled`, `cash_rebalance_enabled`, `auto_rebalance_enabled`, `min_drift_pct`, `min_order_fiat`, both cadences, `next_invest_at`, `next_rebalance_at`, `paused`. |
 | `asset_config` | One row per user and asset: resolved pair, `target_pct`. |
@@ -429,7 +447,7 @@ threshold and one when it recovers, never one per failure.
 | Endpoint | Purpose |
 |---|---|
 | `GET /health` | Liveness |
-| `GET /auth/login/{provider}`, `GET /auth/callback/{provider}`, `POST /auth/logout`, `GET /auth/me` | OAuth |
+| `GET /auth/login/{provider}`, `GET /auth/callback/{provider}`, `POST /auth/refresh`, `POST /auth/logout`, `GET /auth/me` | OAuth sign-in, token refresh and logout |
 | `POST /credentials`, `DELETE /credentials`, `GET /credentials/status` | Kraken key, validated on write per §5.2 |
 | `GET /config`, `PATCH /config` | Settings |
 | `GET /assets`, `PUT /assets/{asset}`, `DELETE /assets/{asset}` | Target weights |
@@ -531,6 +549,10 @@ Non-obvious decisions a reviewer would otherwise question.
 - **OAuth instead of local passwords.** The platform already custodies API keys; adding
   password custody, reset and verification flows would enlarge the blast radius for no
   product gain.
+- **A rotating refresh token, not a long-lived JWT.** A JWT cannot be revoked, so it is
+  kept short; the refresh token is what a session lasts on, and it is revocable because
+  the server looks it up. Rotation with reuse detection turns a stolen refresh token into
+  a signed-out user instead of a silent second session.
 - **Multi-tenant schema and runtime from the start.** Chosen deliberately over a
   single-user build, accepting the larger project 1 in exchange for not retrofitting
   identity later.
@@ -540,6 +562,12 @@ Non-obvious decisions a reviewer would otherwise question.
 - **Key permissions are verified only at registration.** A user can enable
   `withdraw-funds` afterwards and the platform will not notice. Accepted. Re-verification
   costs one `GetApiKeyInfo` call if this is revisited.
+- **An access token outlives logout by at most its own lifetime.** It is never looked up,
+  so logout cannot reach it. Its 15 minutes are the bound, and the check of the user's
+  status on every request makes disabling an account immediate regardless.
+- **Two refreshes with the same token at once end the sign-in.** Strict reuse detection
+  cannot tell two browser tabs from a thief. A grace window of a few seconds is the
+  refinement if it proves annoying.
 - **Encryption at rest does not protect against server compromise.** Bounded instead by
   the permission contract in §5.2.
 - **Deposits and withdrawals are not observed as events.** All free fiat above the cash

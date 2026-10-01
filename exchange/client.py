@@ -29,6 +29,45 @@ class MissingCredentials(Exception):
     """A private endpoint was asked for on a client that has no key."""
 
 
+class KrakenError(RuntimeError):
+    """Kraken answered, and the answer was an error."""
+
+    def __init__(self, errors: list[str]) -> None:
+        super().__init__(f"kraken returned {errors}")
+        self.errors = tuple(errors)
+
+
+class KeyRefused(Exception):
+    """Kraken says this key, or its secret, is not valid.
+
+    Raised only where the caller asked to tell this apart from an outage. Everywhere else
+    it is one more `None`.
+    """
+
+
+class KeyLockedOut(Exception):
+    """Kraken has locked the account out after repeated invalid keys, typically for a few
+    minutes. Every attempt restarts the lockout, so the caller must wait, not retry.
+
+    Raised, like `KeyRefused`, only where the caller asked to tell it apart.
+    """
+
+
+_LOCKOUT_ERROR = "EGeneral:Temporary lockout"
+
+# A nonce error is left out on purpose: it means this system's clock or counter is wrong,
+# not that the person typed the wrong key.
+_REFUSED_KEY_ERRORS = ("EAPI:Invalid key", "EAPI:Invalid signature")
+
+
+def _is_refusal(errors: tuple[str, ...]) -> bool:
+    return any(str(error).startswith(_REFUSED_KEY_ERRORS) for error in errors)
+
+
+def _is_lockout(errors: tuple[str, ...]) -> bool:
+    return any(str(error).startswith(_LOCKOUT_ERROR) for error in errors)
+
+
 def build_http_client(timeout_seconds: float = 10.0) -> httpx.Client:
     """The transport, always with a timeout.
 
@@ -78,7 +117,13 @@ class KrakenClient:
 
         return self._safely(call, endpoint)
 
-    def _private(self, endpoint: str, payload: Mapping[str, str] | None = None) -> dict | None:
+    def _private(
+        self,
+        endpoint: str,
+        payload: Mapping[str, str] | None = None,
+        *,
+        refusals: bool = False,
+    ) -> dict | None:
         credentials = self._credentials
         if credentials is None:
             raise MissingCredentials(endpoint)
@@ -88,27 +133,46 @@ class KrakenClient:
             self._limiter.wait_turn(credentials.api_key)
             nonce = self._limiter.next_nonce(credentials.api_key)
             body = encode_body({"nonce": nonce, **dict(payload or {})})
+            try:
+                signature = sign(path, nonce, body, credentials.api_secret)
+            except ValueError:
+                # Kraken issues base64 secrets, so one that does not decode was mistyped.
+                if refusals:
+                    raise KeyRefused(endpoint) from None
+                raise
             headers = {
                 "API-Key": credentials.api_key,
-                "API-Sign": sign(path, nonce, body, credentials.api_secret),
+                "API-Sign": signature,
                 "Content-Type": "application/x-www-form-urlencoded",
             }
             response = self._http.post(path, content=body, headers=headers)
             response.raise_for_status()
             return self._unwrap(response.json())
 
-        return self._safely(call, endpoint)
+        return self._safely(call, endpoint, refusals=refusals)
 
     @staticmethod
     def _unwrap(payload: dict) -> dict:
         errors = [entry for entry in payload.get("error", []) if _is_error(entry)]
         if errors:
-            raise RuntimeError(f"kraken returned {errors}")
+            raise KrakenError(errors)
         return payload.get("result", {})
 
-    def _safely(self, call: Callable[[], dict], endpoint: str) -> dict | None:
+    def _safely(self, call: Callable[[], dict], endpoint: str, *, refusals: bool = False) -> dict | None:
         try:
             return call()
+        except KeyRefused:
+            logger.warning("kraken %s refused the key", endpoint)
+            raise
+        except KrakenError as exc:
+            if refusals and _is_refusal(exc.errors):
+                logger.warning("kraken %s refused the key", endpoint)
+                raise KeyRefused(endpoint) from None
+            if refusals and _is_lockout(exc.errors):
+                logger.warning("kraken %s is locked out after repeated invalid keys", endpoint)
+                raise KeyLockedOut(endpoint) from None
+            logger.warning("kraken %s failed: %s", endpoint, self._redact(str(exc)))
+            return None
         except Exception as exc:
             logger.warning("kraken %s failed: %s", endpoint, self._redact(str(exc)))
             return None
@@ -167,11 +231,27 @@ class KrakenClient:
                 prices[name] = price
         return prices
 
+    def assets(self) -> dict[str, str] | None:
+        """Kraken's internal name for every asset, mapped to its short name: `XXBT` to `XBT`."""
+        raw = self._public("Assets")
+        if raw is None:
+            return None
+        return {
+            name: str(entry["altname"])
+            for name, entry in raw.items()
+            if isinstance(entry, dict) and entry.get("altname")
+        }
+
     # ----- private data ----------------------------------------------------
 
     def api_key_info(self) -> dict | None:
-        """Requires no permission to call, which is why key validation starts here."""
-        return self._private("GetApiKeyInfo")
+        """Requires no permission to call, which is why key validation starts here.
+
+        Raises `KeyRefused` when Kraken says the key or its secret is wrong, and
+        `KeyLockedOut` when it has stopped listening after too many wrong ones. `None`
+        still means Kraken could not be asked.
+        """
+        return self._private("GetApiKeyInfo", refusals=True)
 
     def balance(self) -> dict[str, Decimal] | None:
         raw = self._private("Balance")

@@ -86,6 +86,8 @@ class KeyRejection(StrEnum):
     """Why a key was refused. Never shown to anyone but its own owner."""
 
     FORBIDDEN_PERMISSIONS = "forbidden_permissions"
+    INVALID_KEY = "invalid_key"
+    LOCKED_OUT = "locked_out"
     MISSING_PERMISSIONS = "missing_permissions"
     UNREACHABLE = "unreachable"
 
@@ -104,3 +106,5 @@ class KeyValidation:
     missing: tuple[str, ...]
     forbidden: tuple[str, ...]
     ip_allowlist: tuple[str, ...]
+    # Granted, neither required nor forbidden: never used, so better turned off. Advice only.
+    unnecessary: tuple[str, ...] = ()

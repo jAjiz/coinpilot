@@ -1,3 +1,4 @@
+from exchange.client import KeyLockedOut, KeyRefused
 from exchange.keys import FORBIDDEN_PERMISSIONS, REQUIRED_PERMISSIONS, validate_key
 from exchange.types import KeyRejection
 
@@ -38,6 +39,26 @@ def test_a_harmless_extra_permission_does_not_matter():
     result = validate_key(FakeClient(_info([*ENOUGH, "query-ledger", "export-data"])))
 
     assert result.accepted is True
+
+
+def test_a_permission_the_platform_never_uses_is_named_so_it_can_be_turned_off():
+    """Accepted, and named: a stolen key should be able to do as little as possible."""
+    result = validate_key(FakeClient(_info([*ENOUGH, "query-ledger", "close-trades"])))
+
+    assert result.accepted is True
+    assert result.unnecessary == ("close-trades", "query-ledger")
+
+
+def test_a_key_with_exactly_what_is_needed_has_nothing_unnecessary():
+    assert validate_key(FakeClient(_info(ENOUGH))).unnecessary == ()
+
+
+def test_a_refused_key_still_names_what_it_does_not_need():
+    """One trip to Kraken's key screen fixes both: add what is missing, remove the rest."""
+    result = validate_key(FakeClient(_info(["query-funds", "export-data", "withdraw-funds"])))
+
+    assert result.accepted is False
+    assert result.unnecessary == ("export-data",)
 
 
 def test_a_key_missing_a_required_permission_is_refused_and_says_which():
@@ -115,3 +136,30 @@ def test_the_result_carries_no_part_of_the_key():
 
     assert "api_key" not in repr(result)
     assert "secret" not in repr(result).lower()
+
+
+class RefusingClient:
+    def api_key_info(self):
+        raise KeyRefused("GetApiKeyInfo")
+
+
+def test_a_key_kraken_refuses_is_invalid_not_unreachable():
+    """The person mistyped something. Telling them Kraken is down sends them to wait."""
+    result = validate_key(RefusingClient())
+
+    assert result.accepted is False
+    assert result.rejection is KeyRejection.INVALID_KEY
+    assert result.permissions == ()
+
+
+class LockedOutClient:
+    def api_key_info(self):
+        raise KeyLockedOut("GetApiKeyInfo")
+
+
+def test_a_lockout_is_its_own_rejection():
+    """Neither a wrong key nor an outage: the person must wait, and a retry makes it longer."""
+    result = validate_key(LockedOutClient())
+
+    assert result.accepted is False
+    assert result.rejection is KeyRejection.LOCKED_OUT

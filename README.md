@@ -1,6 +1,7 @@
 # CoinPilot
 
-> **Status: design approved, implementation not started.**
+> **Status: in development.** Phase 4 of 8: sign-in, encrypted keys and the read path.
+> It cannot place an order yet.
 
 A multi-tenant service that keeps a crypto portfolio at the target allocation its owner
 declared, on Kraken. It does two things, and they matter equally:
@@ -36,6 +37,19 @@ FastAPI, SQLAlchemy, Alembic and APScheduler.
 
 The application that consumes it — a mobile-consultable UI with notifications — is a
 separate project.
+
+## Running it locally
+
+```bash
+docker compose -f docker-compose.dev.yml up -d
+cp .env.example .env    # then fill in the secrets it describes
+set -a; . ./.env; set +a
+PYTHONPATH=. alembic upgrade head
+PYTHONPATH=. uvicorn --factory api.main:build --port 8000
+```
+
+Sign in at `http://localhost:8000/auth/login/google`. The API is described at
+`http://localhost:8000/docs`.
 
 ## Security
 

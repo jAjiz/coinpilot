@@ -10,6 +10,7 @@ that a key the platform holds never started out able to withdraw.
 
 from __future__ import annotations
 
+from exchange.client import KeyLockedOut, KeyRefused
 from exchange.types import KeyRejection, KeyValidation
 
 # `query-open-trades` and `query-closed-trades` are here because resolving a lost order
@@ -20,14 +21,16 @@ REQUIRED_PERMISSIONS = frozenset({"query-funds", "modify-trades", "query-open-tr
 # step before a withdrawal, if the withdrawal permission is ever enabled.
 FORBIDDEN_PERMISSIONS = frozenset({"withdraw-funds", "add-withdraw-address", "update-withdraw-address"})
 
-_UNREACHABLE = KeyValidation(
-    accepted=False,
-    rejection=KeyRejection.UNREACHABLE,
-    permissions=(),
-    missing=(),
-    forbidden=(),
-    ip_allowlist=(),
-)
+
+def _refused(rejection: KeyRejection) -> KeyValidation:
+    return KeyValidation(
+        accepted=False,
+        rejection=rejection,
+        permissions=(),
+        missing=(),
+        forbidden=(),
+        ip_allowlist=(),
+    )
 
 
 def validate_key(client) -> KeyValidation:
@@ -36,13 +39,21 @@ def validate_key(client) -> KeyValidation:
     A key that cannot be read is rejected, not deferred. Storing a key that was never
     validated is the one outcome this contract exists to prevent.
     """
-    info = client.api_key_info()
+    try:
+        info = client.api_key_info()
+    except KeyRefused:
+        return _refused(KeyRejection.INVALID_KEY)
+    except KeyLockedOut:
+        return _refused(KeyRejection.LOCKED_OUT)
     if info is None:
-        return _UNREACHABLE
+        return _refused(KeyRejection.UNREACHABLE)
 
     granted = frozenset(str(entry) for entry in info.get("permissions", []))
     missing = tuple(sorted(REQUIRED_PERMISSIONS - granted))
     forbidden = tuple(sorted(FORBIDDEN_PERMISSIONS & granted))
+    # Not a reason to refuse: the key works. Named so the user can shrink what a stolen
+    # copy could do.
+    unnecessary = tuple(sorted(granted - REQUIRED_PERMISSIONS - FORBIDDEN_PERMISSIONS))
 
     # Both facts are returned; the one named as the reason is the security one. A key that
     # can withdraw is a different kind of problem from a key that is merely incomplete.
@@ -60,4 +71,5 @@ def validate_key(client) -> KeyValidation:
         missing=missing,
         forbidden=forbidden,
         ip_allowlist=tuple(str(entry) for entry in info.get("ipAllowlist", [])),
+        unnecessary=unnecessary,
     )
