@@ -84,3 +84,11 @@ def test_orders_are_not_shared(api, db_session, login, alice, bob):
     )
 
     assert api.get("/orders", headers=login(bob)).json() == []
+
+
+def test_investing_never_borrows_another_users_key(api, login, bob, alice_ready, fake_kraken):
+    """Bob has no key of his own. Alice's must not be the one that answers."""
+    response = api.post("/invest", headers=login(bob))
+
+    assert response.status_code == 409
+    assert fake_kraken.placed == []

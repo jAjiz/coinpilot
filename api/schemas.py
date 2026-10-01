@@ -188,3 +188,28 @@ class EvaluationOut(BaseModel):
     duration_ms: int | None
     status: str
     log_messages: str | None
+
+
+class LegOut(BaseModel):
+    """One leg of an investment. Every amount is a plain decimal string."""
+
+    asset: str
+    pair: str
+    amount_fiat: str
+    minimum_fiat: str | None
+    status: str
+    cl_ord_id: str | None
+    txid: str | None
+    cost: str | None
+    executed_volume: str | None
+    executed_price: str | None
+    fee: str | None
+    error: str | None
+    note: str | None
+
+
+class InvestOut(BaseModel):
+    status: str
+    preview: bool
+    legs: list[LegOut]
+    messages: list[str]
