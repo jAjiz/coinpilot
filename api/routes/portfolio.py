@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from decimal import Decimal
 
 from fastapi import APIRouter, HTTPException
 
@@ -12,26 +11,20 @@ from api.deps import Ctx, CurrentUser, Db
 from api.schemas import PortfolioOut
 from core.crypto import CredentialsUnreadable, Sealed
 from core.db.models import PortfolioSnapshot
+from core.portfolio import plain_amount
 from core.reading import PortfolioUnavailable, read_portfolio
-from exchange.precision import format_decimal
 
 logger = logging.getLogger("coinpilot.api")
 
 router = APIRouter(prefix="/portfolio", tags=["portfolio"])
 
 
-def _plain(value: Decimal) -> str:
-    """The column keeps twelve places. `100.000000000000` and `100` are one amount, and a
-    client must see it written one way, whether the row was just written or read back."""
-    return format_decimal(value.normalize())
-
-
 def _out(snapshot: PortfolioSnapshot) -> PortfolioOut:
     return PortfolioOut(
         as_of=snapshot.as_of,
         fiat=snapshot.fiat,
-        total_value=_plain(snapshot.total_value),
-        cash=_plain(snapshot.cash),
+        total_value=plain_amount(snapshot.total_value),
+        cash=plain_amount(snapshot.cash),
         holdings=snapshot.holdings,
     )
 

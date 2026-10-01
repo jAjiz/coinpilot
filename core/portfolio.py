@@ -127,12 +127,22 @@ def build_view(
     )
 
 
+def plain_amount(value: Decimal) -> str:
+    """One amount, written one way: no padding and no exponent.
+
+    Kraken pads its strings (`74232.30000`), a product carries the padding of both factors,
+    and a `Numeric` column pads to its scale. `100`, `100.00` and `100.000000000000` are
+    one amount, and a client must see it written once.
+    """
+    return format_decimal(value.normalize())
+
+
 def _pct(value: Decimal | None) -> str | None:
     return None if value is None else format_decimal(value.quantize(PERCENT_STEP))
 
 
 def _amount(value: Decimal | None) -> str | None:
-    return None if value is None else format_decimal(value)
+    return None if value is None else plain_amount(value)
 
 
 def _holding_json(holding: Holding) -> dict[str, object]:

@@ -5306,11 +5306,20 @@ repository.
 | `exchange/client.py`, `exchange/keys.py`, `api/routes/credentials.py` | `EGeneral:Temporary lockout` is `KeyRejection.LOCKED_OUT`, a 429 that says to wait | It was reported as an outage, which invites the retries that keep the lockout going. |
 | `core/db/session.py`, `api/app.py` | Opening a connection gives up after 5 s, and an unreachable database answers 503 | Found during the manual check: with Docker stopped, the Google callback hung for psycopg's default 130 s and then answered a bare 500. |
 | `exchange/keys.py`, `api/routes/credentials.py`, `scripts/check_key.py`, spec §5.2 | A key's permissions beyond the contract are returned as `unnecessary`, with the advice to turn them off; never a reason to refuse | Asked for during the manual check. A stolen key should be able to do as little as possible. |
+| `core/portfolio.py`, `api/routes/portfolio.py` | Every amount in a snapshot's `holdings` is written without padding, through one `plain_amount` | Found during the manual check: `value` read `3594.150550803000000`, the padding of Kraken's price and amount multiplied. `total_value` and `cash` had been fixed alone. |
 
 Found in review and left for later:
 
 - **`KeyLimiter` keeps an entry for every key it has seen**, including every wrong key
   sent to `POST /credentials`. The web process's memory grows with them until it restarts.
   Evicting idle keys belongs with the production hardening of phase 8.
+- **New settings invest cash by default.** `invest_cash_enabled` defaults to `true` and
+  `min_order_fiat` to `0`. Nothing acts on it yet, but once the scheduler runs (phase 7) any
+  fiat a user deposits is invested without their having chosen it. Decide when planning
+  phase 5: the proposal is a `false` default, so investing is opted into.
+- **Logging is not production-ready** (phase 8). uvicorn's access log records the whole
+  callback URL, Google's single-use `code` included; it is spent by then, but the line
+  should not be kept as is. The application configures no `logging`, so its own warnings
+  reach stderr with no level, logger or time.
 - **Two refreshes with the same token end the sign-in** and **expired refresh tokens are
   not deleted**: both already listed under *What this phase deliberately leaves out*.

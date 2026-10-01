@@ -124,3 +124,25 @@ def test_the_snapshot_holds_strings_never_floats():
 
     walk(snapshot)
     assert snapshot["assets"]["XBT"]["amount"] == "0.00000001"
+
+
+def test_snapshot_amounts_carry_no_trailing_zeros():
+    """Kraken's strings carry padding (`74232.30000`, `0.0484176100`) and their product
+    carries both. One amount is written one way, as `total_value` and `cash` already are."""
+    view = _view(
+        {"XXBT": D("0.0484176100"), "XETH": D("0.0000596879"), "ZEUR": D("0")},
+        {"XBT": D("100")},
+        {"XBT": D("74232.30000"), "ETH": D("2384.95000")},
+    )
+    assets = view.snapshot_json()["assets"]
+
+    assert assets["XBT"] == {**assets["XBT"], "amount": "0.04841761", "price": "74232.3"}
+    assert assets["XBT"]["value"] == "3594.150550803"
+    assert assets["ETH"]["value"] == "0.142352657105"
+
+
+def test_a_whole_amount_is_not_written_in_scientific_notation():
+    """`Decimal("100").normalize()` is `1E+2`."""
+    view = _view({"XXBT": D("2.00"), "ZEUR": D("0")}, {"XBT": D("100")}, {"XBT": D("50.00")})
+
+    assert view.snapshot_json()["assets"]["XBT"]["value"] == "100"
