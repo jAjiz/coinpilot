@@ -207,6 +207,24 @@ def test_an_approval_that_finds_the_drift_gone_withdraws_the_proposal(
     assert result.proposal is None
     assert get_proposal(db_session, user.id).status == ProposalStatus.WITHDRAWN
     assert _sent(fake_kraken) == []
+    assert result.evaluation.messages[-1] == "the drift is below the threshold; the proposal was withdrawn"
+
+
+def test_an_approval_that_raises_while_executing_still_leaves_the_proposal_executed(
+    app_context, db_session, monkeypatch, user
+):
+    propose(app_context, user.id)
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("lost mid-execution")
+
+    monkeypatch.setattr("core.execution._send_all", broken)
+
+    with pytest.raises(RuntimeError):
+        approve(app_context, user.id, 1)
+
+    db_session.expire_all()
+    assert get_proposal(db_session, user.id).status == ProposalStatus.EXECUTED
 
 
 def test_an_approval_waits_for_an_unresolved_order(app_context, db_session, fake_kraken, user):

@@ -90,10 +90,12 @@ def approve_proposal(body: ApproveIn, user: CurrentUser, context: Ctx) -> Rebala
     if refused is not None:
         return refused
     if result.evaluation.status is EvaluationStatus.SUPERSEDED:
+        # `messages` says why: a new version, or the drift gone and the proposal withdrawn.
         return refusal(
             409,
             "the plan changed since it was proposed; nothing was sent",
             proposal=_proposal_json(result.proposal),
+            messages=list(result.evaluation.messages),
         )
     return _out(result)
 

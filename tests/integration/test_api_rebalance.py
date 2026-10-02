@@ -101,9 +101,23 @@ def test_an_approval_that_meets_a_changed_plan_is_a_409_with_the_new_version(api
 
     assert response.status_code == 409
     assert response.json()["proposal"]["version"] == 2
+    assert "proposal version 2" in response.json()["messages"]
     assert _sent(fake_kraken) == []
     # Both evaluations start at the test's fixed clock, so their order is not defined.
     assert {e["status"] for e in api.get("/sessions", headers=headers).json()} == {"PROPOSED", "SUPERSEDED"}
+
+
+def test_an_approval_that_finds_the_drift_gone_is_a_409_that_says_so(api, headers, fake_kraken):
+    api.post("/rebalance", headers=headers)
+    fake_kraken.balance = {"ZEUR": "0", "XXBT": "0.01", "XETH": "0.2"}
+
+    response = api.post("/proposal/approve", json={"version": 1}, headers=headers)
+
+    assert response.status_code == 409
+    body = response.json()
+    assert body["proposal"] is None
+    assert "the drift is below the threshold; the proposal was withdrawn" in body["messages"]
+    assert _sent(fake_kraken) == []
 
 
 def test_there_is_nothing_to_approve_without_a_proposal(api, headers):

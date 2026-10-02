@@ -105,7 +105,11 @@ def approve(context: ExecutionContext, user_id: uuid.UUID, version: int) -> Reba
             if slot is None or slot.version != version:
                 log.append("the proposal changed before it could execute; nothing was sent")
                 return EvaluationStatus.SUPERSEDED
-            if not has_orders(document) or is_material(slot.plan, document):
+            if not has_orders(document):
+                # `_keep` withdraws it, and says why.
+                _keep(session, user_id, document, ProposalTrigger(slot.trigger), log)
+                return EvaluationStatus.SUPERSEDED
+            if is_material(slot.plan, document):
                 _keep(session, user_id, document, ProposalTrigger(slot.trigger), log)
                 log.append("the plan changed since it was proposed; nothing was sent")
                 return EvaluationStatus.SUPERSEDED
@@ -118,10 +122,14 @@ def approve(context: ExecutionContext, user_id: uuid.UUID, version: int) -> Reba
         log.append(f"proposal version {version} approved; executing")
         return None
 
-    result = evaluate(context, user_id, allow_sells=True, reason=OrderReason.REBALANCE, decide=decide)
-    if executing:
-        with context.sessions() as session:
-            db.set_status(session, user_id, ProposalStatus.EXECUTED)
+    try:
+        result = evaluate(context, user_id, allow_sells=True, reason=OrderReason.REBALANCE, decide=decide)
+    finally:
+        # Even when the evaluation raised: orders may have gone out, and a proposal left
+        # EXECUTING would be neither live nor done.
+        if executing:
+            with context.sessions() as session:
+                db.set_status(session, user_id, ProposalStatus.EXECUTED)
     return RebalanceResult(result, current(context, user_id))
 
 
