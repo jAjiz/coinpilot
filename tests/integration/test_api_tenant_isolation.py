@@ -92,3 +92,13 @@ def test_investing_never_borrows_another_users_key(api, login, bob, alice_ready,
 
     assert response.status_code == 409
     assert fake_kraken.placed == []
+
+
+def test_a_proposal_is_not_shared(api, login, bob, alice_ready, fake_kraken):
+    fake_kraken.balance = {"ZEUR": "100", "XXBT": "0.01"}
+    assert api.post("/rebalance", headers=alice_ready).status_code == 200
+
+    assert api.get("/proposal", headers=login(bob)).status_code == 404
+    assert api.post("/proposal/approve", json={"version": 1}, headers=login(bob)).status_code == 404
+    assert api.delete("/proposal", headers=login(bob)).status_code == 404
+    assert api.get("/proposal", headers=alice_ready).json()["version"] == 1

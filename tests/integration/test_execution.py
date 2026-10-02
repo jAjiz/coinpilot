@@ -154,7 +154,7 @@ def test_a_refused_leg_fails_with_krakens_code_and_the_others_are_still_sent(
 
     result = invest(app_context, user.id)
 
-    assert result.status is EvaluationStatus.DONE
+    assert result.status is EvaluationStatus.PARTIAL
     assert {leg.status for leg in result.legs} == {LegStatus.FAILED}
     assert {leg.error for leg in result.legs} == {"EOrder:Insufficient funds"}
     assert len(_sent(fake_kraken)) == 2

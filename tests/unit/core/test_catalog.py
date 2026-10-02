@@ -35,6 +35,10 @@ class FakeSource:
         self.calls.append("Assets")
         return None if self.names is None else dict(self.names)
 
+    def asset_decimals(self):
+        self.calls.append("Assets")
+        return {"XBT": 10, "EUR": 4}
+
     def asset_pairs(self):
         self.calls.append("AssetPairs")
         return None if self.pairs is None else dict(self.pairs)
@@ -113,3 +117,12 @@ def test_a_caller_cannot_change_the_shared_copy():
         catalog.asset_names()["XXBT"] = "BTC"
 
     assert catalog.asset_names()["XXBT"] == "XBT"
+
+
+def test_the_ledgers_places_are_kept_too():
+    source = FakeSource()
+    catalog, _ = _catalog(source)
+
+    assert catalog.decimals()["EUR"] == 4
+    catalog.decimals()
+    assert source.calls == ["Assets"]

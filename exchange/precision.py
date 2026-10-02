@@ -6,7 +6,7 @@ on a pair worth tens of thousands and destroys one worth a fraction of a cent.
 
 from __future__ import annotations
 
-from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
+from decimal import ROUND_DOWN, ROUND_HALF_UP, ROUND_UP, Decimal
 
 from exchange.types import PairMeta
 
@@ -76,3 +76,15 @@ def minimum_fiat(meta: PairMeta, price: Decimal) -> Decimal:
     placed, never validated when a setting is saved (spec §7.3).
     """
     return max(meta.cost_min, meta.order_min * price)
+
+
+def credited(cost: Decimal, fee: Decimal, places: int) -> Decimal:
+    """What a sell adds to the fiat balance, at most: the ledger's entry, not the order's.
+
+    An order reports its cost and fee with the pair's places; the ledger keeps the fiat's,
+    fewer. A sell that reported 14.93414 and a fee of 0.11947 credited 14.9341 and charged
+    0.1195: 14.8146, not 14.81467. Cost down and fee up, so the budget is never more than
+    the balance, whichever way Kraken rounds.
+    """
+    quantum = _quantum(places)
+    return cost.quantize(quantum, rounding=ROUND_DOWN) - fee.quantize(quantum, rounding=ROUND_UP)

@@ -317,11 +317,18 @@ one, and neither does a rebalance while automatic rebalancing is enabled: that e
 directly.
 
 **The version increments only on a material change**: a leg appears or disappears, or a
-leg's amount moves by more than `min_order_fiat`. That threshold is reused deliberately —
-a separate tolerance parameter would be one more thing to configure and to explain.
+leg's amount moves by more than its effective minimum, the larger of `min_order_fiat`
+and Kraken's minimum for the pair (§7.3). That threshold is reused deliberately — a
+separate tolerance parameter would be one more thing to configure and to explain — and
+Kraken's minimum is part of it because `min_order_fiat` defaults to 0, which would make
+every price move a new version. An unchanged plan is not rewritten: the stored plan stays
+the one the user read. The version never goes back; a proposal after a withdrawn or
+executed one takes the next number.
 
-Approval carries the version. If it matches, the current plan executes. If it does not,
-the request is refused and the new plan is returned; nothing executes.
+Approval carries the version. If it does not match, the request is refused with the live
+proposal and nothing is read. If it matches, the plan is computed again under the user's
+lock: if it has not moved materially, it executes with today's amounts; if it has, it
+becomes the next version, the request is refused with it, and nothing executes.
 
 If drift falls back below the threshold, the proposal is withdrawn automatically.
 
@@ -346,6 +353,30 @@ leg's amount: neither the fee nor a price move between the read and the fill can
 ask for more fiat than there is. They change only how much of the asset arrives. Kraken
 accepts `viqc` on buy market orders only, so a sell is expressed in the base asset's
 volume, which is what the user holds.
+
+A sell pays its fee in fiat (`fciq`), so the volume sent is the volume sold. A sell is
+sized as its amount over the price, rounded down and never above the balance; an exit, a
+target of 0 %, sells the whole balance, which a size computed from a price would leave
+as dust Kraken will not take.
+
+The buys of a rebalance spend the free cash above the cash target plus what the sells
+raised, `cost − fee` of each filled sell as Kraken's ledger credits it. The order reports
+both with the pair's places, and the ledger keeps the fiat's, fewer (4 for EUR, from
+`Assets`): the first real sell reported 14.93414 and a fee of 0.11947, and the ledger
+credited 14.9341 and charged 0.1195, leaving 14.8146. A buy of 14.81467 was refused for
+insufficient funds. So the cost is rounded down and the fee up to the fiat's places before
+they are counted. A sell raises less than planned — the fee, and the price move — so when
+the buys ask for more, every one shrinks by the same factor, and one that falls below its
+minimum is skipped and logged. The balance is not read between the sells and the buys: it
+may not reflect them yet (§9.2).
+
+Verified on that sell: with `fciq` the fee is taken in fiat, nothing in the asset; `cost`
+is gross, `vol_exec × price`. Its `price` is Kraken's average truncated to the pair's
+places (75788.5 for 14.93414 / 0.00019705 = 75788.5998), so `orders.executed_price` may
+differ from Kraken's screen in the last place.
+
+An evaluation in which Kraken refused any order ends `PARTIAL`: every order was answered,
+and what filled stays filled. One stopped by an unknown answer ends `STOPPED`.
 
 What Kraken reports for such an order, verified on the first real one (100 EUR of XBT):
 `cost` is in the quote currency and equals the amount asked; `vol_exec` is in the base
@@ -628,6 +659,10 @@ Non-obvious decisions a reviewer would otherwise question.
 - **The proposal version tracks material change only, measured in `min_order_fiat`.**
   A version that bumped on every recalculation would make approval impossible, and a
   separate tolerance would be one more knob.
+- **An approval executes today's plan, not the stored one.** Hours can pass between
+  reading a proposal and approving it. Executing the stored amounts would sell on stale
+  prices; recomputing and comparing executes what is true now, and only when it is what
+  the user agreed to.
 - **Cadence is the load regulator, not just a preference.** The private call per user is
   the cost driver, so the cadence is what makes multi-tenancy affordable. `MIN` is the
   expensive class and is bounded by an environment floor.

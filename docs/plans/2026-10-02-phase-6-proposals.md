@@ -83,7 +83,7 @@ in the task that owns it.
 | `viqc` is accepted on buy market orders only, so a sell is placed as a volume of the base asset | [AddOrder](https://docs.kraken.com/api-reference/trading/add-order) |
 | A buy placed with `viqc,fcib` reports `cost` in fiat, `vol_exec` in the asset (gross), and `fee` in fiat | Verified on the first real order, spec §9.1 |
 | A sell reports `cost` as the gross proceeds in fiat, `vol_exec × price`, and `fee` in fiat. A past limit sell of the user's, 1.67940915 ETH at an average of 1,487.18 EUR, shows `cost` 2,497.60049 EUR (the sum of its two trades) and `fee` 4.9952 EUR | The user's order `OAQXD6-7GLKC-VPNFRN` |
-| **Open:** that a sell placed with `fciq` *takes* its fee in fiat, so that `cost − fee` is what reached the account. The order above does not settle it: the first buy also reported its fee in fiat although Kraken took it in the asset | Kraken's ledger for the first real sell |
+| ~~Open~~ **Settled:** a sell placed with `fciq` takes its fee in fiat, nothing in the asset. But the ledger rounds to the fiat's 4 places: reported 14.93414 − 0.11947, credited 14.9341 − 0.1195 = 14.8146 | Kraken's ledger for the first real sell, `OXP5PN-2M5O4-VQ5K4A` |
 
 **Why `fciq` on every sell.** By Kraken's default a sell pays its fee in the asset sold.
 An exit that sells the whole balance would then lack the asset to pay the fee, and every
@@ -2461,3 +2461,7 @@ repository.
 
 | Where | What changed | Why |
 |---|---|---|
+| `core/rebalance.py` `approve` | The proposal is marked `EXECUTED` in a `finally` | An evaluation that raised after the approval left it `EXECUTING`, neither live nor done |
+| `api/routes/proposal.py` | A superseded approval's 409 carries the evaluation's `messages`; an approval that finds the drift gone no longer also logs "the plan changed" | The 409 did not say whether there was a new version or the proposal was withdrawn |
+| `exchange/client.py`, `core/catalog.py`, `core/execution.py` | `asset_decimals()` reads the ledger's places from `Assets`; the buy budget counts each sell as `credited(cost, fee, places)`: cost down, fee up | The first real sell: the buy asked for 14.81467, the ledger had credited 14.8146, Kraken refused it for insufficient funds |
+| `core/execution.py` | New evaluation status `PARTIAL` when Kraken refused any order | A rebalance whose buy was refused ended `DONE` |
