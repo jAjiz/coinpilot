@@ -36,6 +36,8 @@ def test_free_cash_is_invested_and_every_amount_is_a_plain_string(api, make_user
     assert body["preview"] is False
     legs = {leg["asset"]: leg for leg in body["legs"]}
     assert legs["XBT"]["status"] == "FILLED"
+    assert legs["XBT"]["side"] == "buy"
+    assert legs["XBT"]["volume"] is None
     assert legs["XBT"]["amount_fiat"] == "600"
     assert legs["XBT"]["cost"] == "600"
     assert legs["XBT"]["minimum_fiat"] == "5"
