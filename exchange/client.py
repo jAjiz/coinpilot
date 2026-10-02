@@ -287,7 +287,9 @@ class KrakenClient:
 
         `in_quote=True` makes `volume` an amount of the quote currency and takes the fee
         in the asset bought (`viqc`, `fcib`), so the order spends exactly that amount
-        (spec §9.1). Kraken accepts it on buys only. `validate=True` has Kraken check the
+        (spec §9.1). Kraken accepts it on buys only. A sell always pays its fee in the
+        quote currency (`fciq`): the volume sent is the volume sold, so selling a whole
+        balance leaves nothing owed in the asset. `validate=True` has Kraken check the
         order and never trade it.
 
         Never `None`. This is the one call where *Kraken refused* and *nobody knows* must be
@@ -304,6 +306,8 @@ class KrakenClient:
         }
         if in_quote:
             payload["oflags"] = "viqc,fcib"
+        elif side == "sell":
+            payload["oflags"] = "fciq"
         if validate:
             payload["validate"] = "true"
 

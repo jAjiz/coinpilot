@@ -460,3 +460,18 @@ def test_an_order_is_queried_by_its_txid():
 
 def test_a_query_that_fails_is_none():
     assert _client(lambda request: httpx.Response(502)).query_orders("OTX-1") is None
+
+
+def test_a_sell_is_a_volume_of_the_asset_and_pays_its_fee_in_fiat():
+    """`fciq`: the volume sent is the volume sold, so an exit can sell everything (spec §9.1)."""
+    seen = {}
+
+    def handler(request):
+        seen["form"] = parse_qs(request.content.decode())
+        return _ok({"txid": ["OTX"]})
+
+    _client(handler).add_order(pair="XXBTZEUR", side="sell", volume=D("0.004"), cl_ord_id="abc123")
+
+    assert seen["form"]["type"] == ["sell"]
+    assert seen["form"]["volume"] == ["0.004"]
+    assert seen["form"]["oflags"] == ["fciq"]
