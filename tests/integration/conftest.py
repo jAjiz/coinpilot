@@ -133,6 +133,10 @@ class FakeKraken:
         self.locked_out = False
         self.down = set()
         self.assets = {"XXBT": "XBT", "XETH": "ETH", "ZEUR": "EUR", "ZUSD": "USD", "SOL": "SOL"}
+        # The places Kraken's ledger keeps, as for real: 4 for a fiat, 10 for a crypto asset.
+        self.decimals = {"ZEUR": 4, "ZUSD": 4}
+        # The fee an order reports, as a share of its cost.
+        self.fee_rate = Decimal("0.004")
         self.pairs = {
             "XXBTZEUR": _raw_pair("XBTEUR", "XXBT", "ZEUR"),
             "XETHZEUR": _raw_pair("ETHEUR", "XETH", "ZEUR"),
@@ -167,7 +171,12 @@ class FakeKraken:
                 return httpx.Response(200, json={"error": ["EAPI:Invalid key"], "result": {}})
             return _ok({"permissions": self.permissions, "ipAllowlist": self.ip_allowlist})
         if endpoint == "Assets":
-            return _ok({name: {"altname": short} for name, short in self.assets.items()})
+            return _ok(
+                {
+                    name: {"altname": short, "decimals": self.decimals.get(name, 10)}
+                    for name, short in self.assets.items()
+                }
+            )
         if endpoint == "AssetPairs":
             return _ok(self.pairs)
         if endpoint == "Balance":
@@ -210,11 +219,11 @@ class FakeKraken:
         if form["type"] == "sell":
             # A volume of the asset; `fciq` takes the fee from the proceeds, in fiat.
             proceeds = (volume * price).quantize(Decimal("0.00001"))
-            vol_exec, cost, fee = volume, proceeds, (proceeds * Decimal("0.004")).quantize(Decimal("0.00001"))
+            vol_exec, cost, fee = volume, proceeds, (proceeds * self.fee_rate).quantize(Decimal("0.00001"))
         else:
             # An amount of fiat (`viqc`). Reported as on the first real order: cost and fee in fiat.
             vol_exec = (volume / price).quantize(Decimal("0.00000001"))
-            cost, fee = volume, (volume * Decimal("0.004")).quantize(Decimal("0.00001"))
+            cost, fee = volume, (volume * self.fee_rate).quantize(Decimal("0.00001"))
         filled = self.fill_status == "closed"
         self.orders[txid] = {
             "status": self.fill_status,

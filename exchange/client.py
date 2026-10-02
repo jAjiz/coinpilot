@@ -251,6 +251,21 @@ class KrakenClient:
             if isinstance(entry, dict) and entry.get("altname")
         }
 
+    def asset_decimals(self) -> dict[str, int] | None:
+        """The places Kraken's ledger keeps for each asset, by short name: `EUR` to 4.
+
+        An order reports its cost and fee with more places than that. What moves the
+        balance is the ledger's entry, rounded to these.
+        """
+        raw = self._public("Assets")
+        if raw is None:
+            return None
+        return {
+            str(entry["altname"]): int(entry["decimals"])
+            for entry in raw.values()
+            if isinstance(entry, dict) and entry.get("altname") and entry.get("decimals") is not None
+        }
+
     # ----- private data ----------------------------------------------------
 
     def api_key_info(self) -> dict | None:

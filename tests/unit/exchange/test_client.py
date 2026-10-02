@@ -334,6 +334,17 @@ def test_an_asset_with_no_short_name_is_skipped():
     assert client.assets() == {"XXBT": "XBT"}
 
 
+def test_asset_decimals_are_the_ledgers_places_by_short_name():
+    raw = {"XXBT": {"altname": "XBT", "decimals": 10}, "ZEUR": {"altname": "EUR", "decimals": 4}, "ODD": {}}
+    client = _client(lambda request: _ok(raw))
+
+    assert client.asset_decimals() == {"XBT": 10, "EUR": 4}
+
+
+def test_asset_decimals_are_none_when_kraken_cannot_be_read():
+    assert _client(lambda request: httpx.Response(503)).asset_decimals() is None
+
+
 def test_asset_names_are_none_when_kraken_cannot_be_read():
     assert _client(lambda request: httpx.Response(503)).assets() is None
 

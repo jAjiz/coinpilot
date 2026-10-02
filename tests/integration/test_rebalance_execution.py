@@ -78,6 +78,37 @@ def test_the_sell_goes_first_and_its_proceeds_fund_the_buy(app_context, fake_kra
     ]
 
 
+def test_the_buy_spends_what_the_ledger_credited_not_what_the_sell_reported(app_context, fake_kraken, ready):
+    """The sell reports 200 and a fee of 0.80005. The ledger keeps four places for EUR,
+    so it charges 0.8001 and credits 199.1999. A buy of 199.19995 would be refused."""
+    user = ready()
+    fake_kraken.fee_rate = D("0.00400025")
+
+    result = _rebalance(app_context, user)
+
+    assert result.status is EvaluationStatus.DONE
+    _, buy = _sent(fake_kraken)
+    assert D(buy["volume"]) == D("199.1999")
+
+
+def test_a_refused_buy_after_a_filled_sell_is_partial(app_context, db_session, fake_kraken, ready):
+    user = ready()
+
+    def refuse_buys(form):
+        fake_kraken.add_order_errors = ["EOrder:Insufficient funds"] if form["type"] == "buy" else []
+
+    fake_kraken.on_add_order = refuse_buys
+
+    result = _rebalance(app_context, user)
+
+    assert result.status is EvaluationStatus.PARTIAL
+    assert [(leg.asset, leg.status) for leg in result.legs] == [
+        ("XBT", LegStatus.FILLED),
+        ("ETH", LegStatus.FAILED),
+    ]
+    assert [e.status for e in list_evaluations(db_session, user.id)] == ["PARTIAL"]
+
+
 def test_a_rebalance_writes_its_orders_with_its_reason(app_context, db_session, ready):
     user = ready()
 

@@ -360,10 +360,23 @@ target of 0 %, sells the whole balance, which a size computed from a price would
 as dust Kraken will not take.
 
 The buys of a rebalance spend the free cash above the cash target plus what the sells
-raised, `cost − fee` of each filled sell as the ledger reports it. A sell raises less than
-planned — the fee, and the price move — so when the buys ask for more, every one shrinks
-by the same factor, and one that falls below its minimum is skipped and logged. The
-balance is not read between the sells and the buys: it may not reflect them yet (§9.2).
+raised, `cost − fee` of each filled sell as Kraken's ledger credits it. The order reports
+both with the pair's places, and the ledger keeps the fiat's, fewer (4 for EUR, from
+`Assets`): the first real sell reported 14.93414 and a fee of 0.11947, and the ledger
+credited 14.9341 and charged 0.1195, leaving 14.8146. A buy of 14.81467 was refused for
+insufficient funds. So the cost is rounded down and the fee up to the fiat's places before
+they are counted. A sell raises less than planned — the fee, and the price move — so when
+the buys ask for more, every one shrinks by the same factor, and one that falls below its
+minimum is skipped and logged. The balance is not read between the sells and the buys: it
+may not reflect them yet (§9.2).
+
+Verified on that sell: with `fciq` the fee is taken in fiat, nothing in the asset; `cost`
+is gross, `vol_exec × price`. Its `price` is Kraken's average truncated to the pair's
+places (75788.5 for 14.93414 / 0.00019705 = 75788.5998), so `orders.executed_price` may
+differ from Kraken's screen in the last place.
+
+An evaluation in which Kraken refused any order ends `PARTIAL`: every order was answered,
+and what filled stays filled. One stopped by an unknown answer ends `STOPPED`.
 
 What Kraken reports for such an order, verified on the first real one (100 EUR of XBT):
 `cost` is in the quote currency and equals the amount asked; `vol_exec` is in the base

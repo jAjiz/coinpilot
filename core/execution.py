@@ -34,7 +34,7 @@ from core.settlement import resolve_pending, settle
 from engine.reconcile import reconcile
 from engine.types import HUNDRED, ZERO, CashPolicy, Policy, Side
 from exchange.orders import find_order_by_txid, new_cl_ord_id
-from exchange.precision import minimum_fiat, round_cost, round_volume, volume_from_fiat
+from exchange.precision import credited, minimum_fiat, round_cost, round_volume, volume_from_fiat
 from exchange.types import Credentials, PairMeta, Placement, PlacementOutcome
 
 logger = logging.getLogger("coinpilot.execution")
@@ -70,6 +70,8 @@ class EvaluationStatus(StrEnum):
     KRAKEN_UNAVAILABLE = "KRAKEN_UNAVAILABLE"
     PREVIEW = "PREVIEW"
     ERROR = "ERROR"
+    # Every order was answered, and Kraken refused at least one. What filled stays filled.
+    PARTIAL = "PARTIAL"
     # A rebalance was computed and waits for approval. Nothing was sent.
     PROPOSED = "PROPOSED"
     # An approval met a plan that had changed. Nothing was sent.
@@ -137,6 +139,8 @@ class Planned:
     # Fiat above the cash target when the account was read: what buys may spend before
     # any sell has raised anything.
     free_cash: Decimal
+    # The places Kraken's ledger keeps for the fiat: what a sell credits is rounded to them.
+    fiat_places: int
 
 
 # Once the plan is known, under the lock: `None` sends it, and a status ends the
@@ -241,6 +245,9 @@ def _plan(context: ExecutionContext, account: _Account, private) -> Planned:
     metas = context.catalog.pairs()
     if metas is None:
         raise PortfolioUnavailable("asset pairs")
+    places = (context.catalog.decimals() or {}).get(account.fiat)
+    if places is None:
+        raise PortfolioUnavailable("asset decimals")
     managed = {holding.asset: holding for holding in view.holdings if holding.managed}
     pair_of = {target.asset: target.pair for target in account.targets}
     target_of = {target.asset: target.target_pct for target in account.targets}
@@ -282,7 +289,7 @@ def _plan(context: ExecutionContext, account: _Account, private) -> Planned:
                 f"of {plain_amount(minimum)} {account.fiat}"
             )
         legs.append(PlannedLeg(leg.asset, pair, leg.side, amount, minimum, note, volume, meta))
-    return Planned(view=view, legs=tuple(legs), free_cash=_free_cash(view))
+    return Planned(view=view, legs=tuple(legs), free_cash=_free_cash(view), fiat_places=places)
 
 
 def _free_cash(view: PortfolioView) -> Decimal:
@@ -351,6 +358,8 @@ def _evaluate(
     stopped = _send_all(context, user_id, private, planned, reason, account.fiat, log, legs)
     if stopped:
         return EvaluationStatus.STOPPED
+    if any(leg.status is LegStatus.FAILED for leg in legs):
+        return EvaluationStatus.PARTIAL
     if any(leg.status is not LegStatus.SKIPPED for leg in legs):
         return EvaluationStatus.DONE
     return EvaluationStatus.NOTHING_TO_DO
@@ -380,8 +389,9 @@ def _send_all(
         legs.append(result)
         log.append(_describe(result, fiat))
         if result.status is LegStatus.FILLED:
-            # `fciq`: Kraken reports a sell's proceeds and its fee in fiat.
-            budget += (result.cost or ZERO) - (result.fee or ZERO)
+            # `fciq`: the fee is in fiat. Counted as the ledger rounds it, not as the order
+            # reports it: a buy of the reported amount was refused for 0.00007 EUR.
+            budget += credited(result.cost or ZERO, result.fee or ZERO, planned.fiat_places)
 
     buys = [leg for leg in planned.legs if leg.side is Side.BUY]
     for leg in _within(buys, budget, fiat):

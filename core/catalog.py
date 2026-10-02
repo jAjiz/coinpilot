@@ -25,6 +25,8 @@ CATALOG_TTL = timedelta(days=1)
 class CatalogSource(Protocol):
     def assets(self) -> dict[str, str] | None: ...
 
+    def asset_decimals(self) -> dict[str, int] | None: ...
+
     def asset_pairs(self) -> dict[str, PairMeta] | None: ...
 
 
@@ -55,6 +57,7 @@ class MarketCatalog:
     def __init__(self, source: CatalogSource, now: Callable[[], datetime], ttl: timedelta = CATALOG_TTL):
         self._names = _Kept(source.assets, now, ttl)
         self._pairs = _Kept(source.asset_pairs, now, ttl)
+        self._decimals = _Kept(source.asset_decimals, now, ttl)
 
     def asset_names(self) -> Mapping[str, str] | None:
         """Internal name to short name, as `KrakenClient.assets()`. `None` if Kraken did not answer."""
@@ -63,3 +66,7 @@ class MarketCatalog:
     def pairs(self) -> Mapping[str, PairMeta] | None:
         """Every pair, as `KrakenClient.asset_pairs()`. `None` if Kraken did not answer."""
         return self._pairs.get()
+
+    def decimals(self) -> Mapping[str, int] | None:
+        """The ledger's places by short name, as `KrakenClient.asset_decimals()`."""
+        return self._decimals.get()
