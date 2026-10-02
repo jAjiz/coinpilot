@@ -201,26 +201,36 @@ class FakeKraken:
         if self.add_order_errors:
             return httpx.Response(200, json={"error": self.add_order_errors, "result": {}})
         if form.get("validate") == "true":
-            return _ok({"descr": {"order": f"buy {form['volume']} {form['pair']} @ market"}})
+            return _ok({"descr": {"order": f"{form['type']} {form['volume']} {form['pair']} @ market"}})
         if self.lose_add_order == "dropped":
             return httpx.Response(503)
         txid = f"OTX{len(self.orders) + 1:03d}-AAAAA-BBBBBB"
-        spent = Decimal(form["volume"])
+        volume = Decimal(form["volume"])
         price = Decimal(self.prices[form["pair"]])
+        if form["type"] == "sell":
+            # A volume of the asset; `fciq` takes the fee from the proceeds, in fiat.
+            proceeds = (volume * price).quantize(Decimal("0.00001"))
+            vol_exec, cost, fee = volume, proceeds, (proceeds * Decimal("0.004")).quantize(Decimal("0.00001"))
+        else:
+            # An amount of fiat (`viqc`). Reported as on the first real order: cost and fee in fiat.
+            vol_exec = (volume / price).quantize(Decimal("0.00000001"))
+            cost, fee = volume, (volume * Decimal("0.004")).quantize(Decimal("0.00001"))
         filled = self.fill_status == "closed"
         self.orders[txid] = {
             "status": self.fill_status,
             "cl_ord_id": form["cl_ord_id"],
             "oflags": form.get("oflags", ""),
             "vol": form["volume"],
-            "vol_exec": str((spent / price).quantize(Decimal("0.00000001"))) if filled else "0",
-            "cost": str(spent) if filled else "0",
-            "fee": str((spent * Decimal("0.004") / price).quantize(Decimal("0.00000001"))) if filled else "0",
+            "vol_exec": str(vol_exec) if filled else "0",
+            "cost": str(cost) if filled else "0",
+            "fee": str(fee) if filled else "0",
             "price": str(price) if filled else "0",
         }
         if self.lose_add_order == "executed":
             return httpx.Response(503)
-        return _ok({"descr": {"order": f"buy {form['volume']} {form['pair']} @ market"}, "txid": [txid]})
+        return _ok(
+            {"descr": {"order": f"{form['type']} {form['volume']} {form['pair']} @ market"}, "txid": [txid]}
+        )
 
 
 class FakeGoogle:

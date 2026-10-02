@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from api.deps import Ctx, CurrentUser
 from api.schemas import InvestOut, LegOut
 from core.crypto import CredentialsUnreadable
-from core.execution import EvaluationBusy, EvaluationStatus, InvestResult, LegResult, NotReady, invest
+from core.execution import EvaluationBusy, EvaluationResult, EvaluationStatus, LegResult, NotReady, invest
 from core.portfolio import plain_amount
 
 logger = logging.getLogger("coinpilot.api")
@@ -41,7 +41,7 @@ def _leg(leg: LegResult) -> LegOut:
     )
 
 
-def _out(result: InvestResult) -> InvestOut:
+def _out(result: EvaluationResult) -> InvestOut:
     return InvestOut(
         status=result.status.value,
         preview=result.preview,
