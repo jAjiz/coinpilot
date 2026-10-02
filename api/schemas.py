@@ -144,6 +144,9 @@ class AssetOut(BaseModel):
     asset: str
     pair: str
     target_pct: Decimal
+    # Kraken's smallest order on the asset's pair, in fiat, at the current price (§7.3).
+    # Absent from `PUT`, and `null` when Kraken could not be read.
+    kraken_min_fiat: str | None = None
 
 
 class AssetsOut(BaseModel):
@@ -175,6 +178,8 @@ class OrderOut(BaseModel):
     executed_volume: Decimal | None
     executed_price: Decimal | None
     fee: Decimal | None
+    cost: Decimal | None
+    error: str | None
     created_at: datetime
 
 
@@ -186,3 +191,28 @@ class EvaluationOut(BaseModel):
     duration_ms: int | None
     status: str
     log_messages: str | None
+
+
+class LegOut(BaseModel):
+    """One leg of an investment. Every amount is a plain decimal string."""
+
+    asset: str
+    pair: str
+    amount_fiat: str
+    minimum_fiat: str | None
+    status: str
+    cl_ord_id: str | None
+    txid: str | None
+    cost: str | None
+    executed_volume: str | None
+    executed_price: str | None
+    fee: str | None
+    error: str | None
+    note: str | None
+
+
+class InvestOut(BaseModel):
+    status: str
+    preview: bool
+    legs: list[LegOut]
+    messages: list[str]

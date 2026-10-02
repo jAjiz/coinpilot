@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 from datetime import UTC, datetime
+from functools import partial
 
 import httpx
 from fastapi import FastAPI
@@ -17,7 +18,8 @@ from api.context import AppContext
 from core.catalog import MarketCatalog
 from core.config import load_config
 from core.crypto import CredentialCipher
-from core.db.session import configure, session_scope
+from core.db.locks import advisory_user_lock
+from core.db.session import configure, get_engine, session_scope
 from core.tokens import TokenSigner
 from exchange.client import KrakenClient, build_http_client
 from exchange.limits import KeyLimiter
@@ -44,6 +46,7 @@ def build() -> FastAPI:
         cipher=CredentialCipher(config.credential_keys, config.credential_key_version),
         signer=TokenSigner(config.jwt_secret, config.jwt_ttl, now=now),
         catalog=MarketCatalog(KrakenClient(kraken_http, limiter), now),
+        user_lock=partial(advisory_user_lock, get_engine()),
         now=now,
     )
     return create_app(context)

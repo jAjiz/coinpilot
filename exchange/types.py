@@ -42,6 +42,8 @@ class PairMeta:
     order_min: Decimal
     cost_min: Decimal
     status: str
+    # Decimal places of an amount in the quote currency. A buy in fiat is rounded to it.
+    cost_decimals: int
 
     @property
     def tradable(self) -> bool:
@@ -80,6 +82,8 @@ class OrderLookup:
     volume_executed: Decimal
     price: Decimal
     fee: Decimal
+    # In the quote currency, a buy in fiat included (verified on a real order, spec §9.1).
+    cost: Decimal
 
 
 class KeyRejection(StrEnum):
@@ -108,3 +112,24 @@ class KeyValidation:
     ip_allowlist: tuple[str, ...]
     # Granted, neither required nor forbidden: never used, so better turned off. Advice only.
     unnecessary: tuple[str, ...] = ()
+
+
+class PlacementOutcome(StrEnum):
+    """What one `AddOrder` call achieved (spec §9.4).
+
+    `UNKNOWN` is the lost answer of spec §9.2: the order may exist. `REFUSED` is Kraken
+    saying it does not.
+    """
+
+    SENT = "sent"
+    VALIDATED = "validated"
+    REFUSED = "refused"
+    UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class Placement:
+    outcome: PlacementOutcome
+    txid: str | None = None
+    # Kraken's first error code, on a refusal only.
+    error: str | None = None

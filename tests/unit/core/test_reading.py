@@ -11,7 +11,7 @@ NAMES = {"XXBT": "XBT", "XETH": "ETH", "ZEUR": "EUR", "SOL": "SOL"}
 
 
 def _pair(name, base, quote):
-    return PairMeta(name, name, base, quote, 1, 8, D("0.0001"), D("0.5"), "online")
+    return PairMeta(name, name, base, quote, 1, 8, D("0.0001"), D("0.5"), "online", 5)
 
 
 @dataclass

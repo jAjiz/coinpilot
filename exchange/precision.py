@@ -57,3 +57,22 @@ def is_orderable(meta: PairMeta, volume: Decimal, cost: Decimal) -> bool:
     which is the point of checking after rounding rather than before.
     """
     return volume >= meta.order_min and cost >= meta.cost_min
+
+
+def round_cost(meta: PairMeta, amount: Decimal) -> Decimal:
+    """A fiat amount to the pair's cost precision, always down.
+
+    Down for the reason a volume is rounded down: up would spend more than the plan
+    allocated, and the last leg of an investment can be every cent there is.
+    """
+    return amount.quantize(_quantum(meta.cost_decimals), rounding=ROUND_DOWN)
+
+
+def minimum_fiat(meta: PairMeta, price: Decimal) -> Decimal:
+    """The smallest order Kraken takes on this pair, in fiat, at this price.
+
+    `costmin` is in the quote currency; `ordermin` is in the base asset, so its fiat value
+    moves with the price. That is why this is computed when an order is about to be
+    placed, never validated when a setting is saved (spec §7.3).
+    """
+    return max(meta.cost_min, meta.order_min * price)

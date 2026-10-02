@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from decimal import Decimal, InvalidOperation
 
 from exchange.types import ExchangeOrderStatus, OrderLookup
@@ -51,23 +51,29 @@ def _as_decimal(raw: object) -> Decimal:
         return ZERO
 
 
+def _lookup(txid: str, order: dict) -> OrderLookup:
+    return OrderLookup(
+        txid=txid,
+        status=map_order_status(order.get("status")),
+        volume=_as_decimal(order.get("vol")),
+        volume_executed=_as_decimal(order.get("vol_exec")),
+        price=_as_decimal(order.get("price")),
+        fee=_as_decimal(order.get("fee")),
+        cost=_as_decimal(order.get("cost")),
+    )
+
+
 def _match(orders: dict[str, dict], cl_ord_id: str) -> OrderLookup | None:
     """The first order that echoes the id we asked for, as a value object."""
     for txid, order in orders.items():
-        if order.get("cl_ord_id") != cl_ord_id:
-            continue
-        return OrderLookup(
-            txid=txid,
-            status=map_order_status(order.get("status")),
-            volume=_as_decimal(order.get("vol")),
-            volume_executed=_as_decimal(order.get("vol_exec")),
-            price=_as_decimal(order.get("price")),
-            fee=_as_decimal(order.get("fee")),
-        )
+        if order.get("cl_ord_id") == cl_ord_id:
+            return _lookup(txid, order)
     return None
 
 
-ABSENT = OrderLookup(txid=None, status=None, volume=ZERO, volume_executed=ZERO, price=ZERO, fee=ZERO)
+ABSENT = OrderLookup(
+    txid=None, status=None, volume=ZERO, volume_executed=ZERO, price=ZERO, fee=ZERO, cost=ZERO
+)
 
 
 def find_order_by_cl_ord_id(client, cl_ord_id: str) -> OrderLookup | None:
@@ -107,3 +113,36 @@ def find_order_by_cl_ord_id(client, cl_ord_id: str) -> OrderLookup | None:
         unresolved = True
 
     return None if unresolved else ABSENT
+
+
+# Spec §9.4. Closed on purpose: a code not listed here, including one Kraken adds later,
+# reads as unknown. Reading a new code as a refusal is how a duplicate order happens.
+DEFINITIVE_REFUSALS = (
+    "EOrder:",
+    "EGeneral:Invalid arguments",
+    "EGeneral:Permission denied",
+    "EAPI:",
+    "EService:Market in cancel_only mode",
+    "EService:Market in post_only mode",
+    "EService:Market in limit_only mode",
+)
+
+
+def is_definitive_refusal(errors: Sequence[str]) -> bool:
+    """Every code Kraken returned says the order was not accepted.
+
+    One code that does not is enough to make the answer unknown, and so is no code at all.
+    """
+    return bool(errors) and all(str(error).startswith(DEFINITIVE_REFUSALS) for error in errors)
+
+
+def find_order_by_txid(client, txid: str) -> OrderLookup | None:
+    """An order whose txid Kraken gave us.
+
+    `None` when it could not be read, and never `ABSENT`: Kraken named this order, so it
+    exists, and an answer that leaves it out is still unknown.
+    """
+    orders = client.query_orders(txid)
+    if not orders or txid not in orders:
+        return None
+    return _lookup(txid, orders[txid])

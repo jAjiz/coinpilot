@@ -345,9 +345,19 @@ currency, and `fcib` takes the fee in the asset bought. The order spends exactly
 leg's amount: neither the fee nor a price move between the read and the fill can make it
 ask for more fiat than there is. They change only how much of the asset arrives. Kraken
 accepts `viqc` on buy market orders only, so a sell is expressed in the base asset's
-volume, which is what the user holds. Whether Kraken reports the fee of an `fcib` order in
-the base or the quote currency is verified on the first real order; until then the ledger
-stores what Kraken returns, unconverted.
+volume, which is what the user holds.
+
+What Kraken reports for such an order, verified on the first real one (100 EUR of XBT):
+`cost` is in the quote currency and equals the amount asked; `vol_exec` is in the base
+asset and is gross, the volume bought before the fee; and `fee` is reported in the quote
+currency although it is taken in the base asset. The ledger stores the three as reported,
+so `orders.fee` is in fiat. What arrives in the account is `vol_exec − fee / price`; nothing
+relies on it, because every evaluation reads the real balance.
+
+The fee percentages above were Kraken's when this was written. Kraken has since raised the
+taker fee to 0.8 %, which the first real order paid. The choice stands: an investment
+is small and a rebalance occasional, so the wider gap is a cost accepted, not a reason to
+rest limit orders.
 
 ### 9.2 The unknown result
 

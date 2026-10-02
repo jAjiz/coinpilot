@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 from fastapi import APIRouter, HTTPException, Response
 
 import core.database as db
@@ -9,18 +11,43 @@ from api.deps import Ctx, CurrentUser, Db
 from api.schemas import AssetIn, AssetOut, AssetsOut
 from core.db.models import AssetConfig
 from core.markets import resolve_pair, short_name
+from core.portfolio import plain_amount
 from engine.types import HUNDRED, ZERO
+from exchange.precision import minimum_fiat
 
 router = APIRouter(prefix="/assets", tags=["assets"])
 
 KRAKEN_DOWN = "kraken could not be reached; nothing was changed"
 
 
+def _minimums(context: Ctx, pairs: list[str]) -> dict[str, Decimal]:
+    """Kraken's minimum per pair at the current price. Empty when Kraken cannot be read:
+    the weights are still worth showing."""
+    if not pairs:
+        return {}
+    metas = context.catalog.pairs()
+    prices = context.public_kraken().ticker(sorted(set(pairs)))
+    if metas is None or prices is None:
+        return {}
+    return {
+        pair: minimum_fiat(metas[pair], prices[pair]) for pair in pairs if pair in metas and pair in prices
+    }
+
+
 @router.get("", response_model=AssetsOut)
-def list_assets(user: CurrentUser, session: Db) -> AssetsOut:
+def list_assets(user: CurrentUser, session: Db, context: Ctx) -> AssetsOut:
     rows = db.list_assets(session, user.id)
+    minimums = _minimums(context, [row.pair for row in rows])
     return AssetsOut(
-        assets=[AssetOut.model_validate(row) for row in rows],
+        assets=[
+            AssetOut(
+                asset=row.asset,
+                pair=row.pair,
+                target_pct=row.target_pct,
+                kraken_min_fiat=plain_amount(minimums[row.pair]) if row.pair in minimums else None,
+            )
+            for row in rows
+        ],
         cash_target_pct=HUNDRED - sum((row.target_pct for row in rows), ZERO),
     )
 

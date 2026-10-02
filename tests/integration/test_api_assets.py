@@ -161,3 +161,29 @@ def test_an_asset_is_removed_by_its_stored_name_when_kraken_is_down(
 
     assert api.delete("/assets/xbt", headers=login(user)).status_code == 204
     assert list_assets(db_session, user.id) == []
+
+
+def test_each_weight_shows_krakens_current_minimum(api, make_user, login):
+    """XBT: 0.0001 at 50 000 is 5, over the 0.5 cost minimum. ETH: 0.0001 at 2 500 is
+    0.25, under it."""
+    headers = login(make_user())
+    _with_fiat(api, headers)
+    api.put("/assets/XBT", json={"target_pct": "60"}, headers=headers)
+    api.put("/assets/ETH", json={"target_pct": "40"}, headers=headers)
+
+    body = api.get("/assets", headers=headers).json()
+
+    minimums = {row["asset"]: row["kraken_min_fiat"] for row in body["assets"]}
+    assert minimums == {"XBT": "5", "ETH": "0.5"}
+
+
+def test_the_weights_are_shown_even_when_prices_cannot_be_read(api, make_user, login, fake_kraken):
+    headers = login(make_user())
+    _with_fiat(api, headers)
+    api.put("/assets/XBT", json={"target_pct": "60"}, headers=headers)
+    fake_kraken.down.add("Ticker")
+
+    response = api.get("/assets", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json()["assets"][0]["kraken_min_fiat"] is None

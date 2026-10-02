@@ -28,7 +28,8 @@ def test_a_new_settings_row_starts_with_the_stated_defaults(db_session: Session,
     settings = create_settings(db_session, make_user().id, fiat="EUR")
 
     assert settings.fiat == "EUR"
-    assert settings.invest_cash_enabled is True
+    # Investing on a cadence is opted into (spec §3.4).
+    assert settings.invest_cash_enabled is False
     assert settings.cash_rebalance_enabled is False
     assert settings.auto_rebalance_enabled is False
     assert settings.min_drift_pct == D("0")

@@ -15,6 +15,7 @@ from core.db.orders import (
     list_orders,
     mark_failed,
     mark_filled,
+    mark_sent,
     pending_orders,
     record_attempt,
 )
@@ -94,6 +95,7 @@ __all__ = [
     "mark_failed",
     "mark_filled",
     "mark_refresh_token_used",
+    "mark_sent",
     "pending_orders",
     "record_attempt",
     "record_snapshot",

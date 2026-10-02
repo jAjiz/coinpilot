@@ -17,7 +17,7 @@ def test_the_first_patch_creates_the_settings_with_their_defaults(api, make_user
     assert response.status_code == 200
     body = response.json()
     assert body["fiat"] == "EUR"
-    assert body["invest_cash_enabled"] is True
+    assert body["invest_cash_enabled"] is False
     assert body["invest_cadence_mode"] == "MIN"
     assert Decimal(body["min_order_fiat"]) == 0
 

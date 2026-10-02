@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -10,6 +11,7 @@ from core.db.orders import (
     list_orders,
     mark_failed,
     mark_filled,
+    mark_sent,
     pending_orders,
     record_attempt,
 )
@@ -147,3 +149,63 @@ def test_every_reason_the_code_knows_is_accepted(db_session: Session, make_user,
 @pytest.mark.parametrize("side", [member.value for member in Side])
 def test_every_side_the_code_knows_is_accepted(db_session: Session, make_user, side):
     _attempt(db_session, make_user().id, f"cl-side-{side}", side=side)
+
+
+def test_an_attempt_carries_the_time_the_executor_gives_it(db_session: Session, make_user):
+    """Written from the executor's clock, so the grace before an absence is counted on it."""
+    at = datetime(2026, 10, 1, 9, 0, tzinfo=UTC)
+
+    order = _attempt(db_session, make_user().id, "cl-10", attempted_at=at)
+
+    assert order.attempted_at == at
+
+
+def test_an_attempt_without_a_time_gets_the_databases(db_session: Session, make_user):
+    assert _attempt(db_session, make_user().id, "cl-11").attempted_at is not None
+
+
+def test_a_sent_order_keeps_its_txid_and_stays_unresolved(db_session: Session, make_user):
+    """Kraken accepted it. How it filled is not known yet."""
+    user = make_user()
+    _attempt(db_session, user.id, "cl-12")
+
+    order = mark_sent(db_session, "cl-12", "OTX001-AAAAA-BBBBBB")
+
+    assert order.txid == "OTX001-AAAAA-BBBBBB"
+    assert order.status == OrderStatus.PENDING
+    assert has_unresolved(db_session, user.id) is True
+
+
+def test_a_fill_records_what_it_cost(db_session: Session, make_user):
+    _attempt(db_session, make_user().id, "cl-13")
+
+    order = mark_filled(
+        db_session,
+        "cl-13",
+        txid="OTX002-AAAAA-BBBBBB",
+        executed_volume=D("0.001"),
+        executed_price=D("50000"),
+        fee=D("0.000004"),
+        cost=D("50"),
+    )
+
+    assert order.cost == D("50")
+
+
+def test_a_refusal_keeps_krakens_code(db_session: Session, make_user):
+    _attempt(db_session, make_user().id, "cl-14")
+
+    order = mark_failed(db_session, "cl-14", error="EOrder:Insufficient funds")
+
+    assert order.error == "EOrder:Insufficient funds"
+
+
+def test_an_error_longer_than_its_column_is_cut_not_refused(db_session: Session, make_user):
+    """A refusal must always be recordable. A row that cannot be written stays PENDING."""
+    _attempt(db_session, make_user().id, "cl-15")
+
+    assert len(mark_failed(db_session, "cl-15", error="E" * 200).error) == 64
+
+
+def test_an_unknown_client_id_cannot_be_marked_sent(db_session: Session):
+    assert mark_sent(db_session, "never-minted", "OTX") is None

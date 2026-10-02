@@ -15,6 +15,7 @@ import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 
 import httpx
@@ -113,6 +114,7 @@ def _raw_pair(altname, base, quote, status="online"):
         "lot_decimals": 8,
         "ordermin": "0.0001",
         "costmin": "0.5",
+        "cost_decimals": 5,
         "status": status,
     }
 
@@ -139,6 +141,19 @@ class FakeKraken:
         self.balance = {}
         self.prices = {"XXBTZEUR": "50000", "XETHZEUR": "2500", "SOLEUR": "100"}
         self.calls = []
+        # Orders Kraken knows, by txid, as Kraken reports them.
+        self.orders = {}
+        # Every AddOrder form, validated ones included.
+        self.placed = []
+        # The error list the next AddOrder answers with. Empty: it is accepted.
+        self.add_order_errors = []
+        # None: answer normally. "dropped": fail the HTTP answer and execute nothing.
+        # "executed": execute the order, then fail the HTTP answer — the lost response.
+        self.lose_add_order = None
+        # The status a new order is reported with when it is read.
+        self.fill_status = "closed"
+        # Called with each AddOrder form, before Kraken acts on it.
+        self.on_add_order = None
 
     def __call__(self, request):
         endpoint = request.url.path.rsplit("/", 1)[-1]
@@ -160,7 +175,52 @@ class FakeKraken:
         if endpoint == "Ticker":
             wanted = request.url.params.get("pair", "").split(",")
             return _ok({pair: {"c": [self.prices[pair], "1"]} for pair in wanted if pair in self.prices})
+        if endpoint == "AddOrder":
+            return self._add_order(dict(urllib.parse.parse_qsl(request.content.decode())))
+        if endpoint == "QueryOrders":
+            txid = dict(urllib.parse.parse_qsl(request.content.decode())).get("txid")
+            if txid not in self.orders:
+                return httpx.Response(200, json={"error": ["EOrder:Invalid order"], "result": {}})
+            return _ok({txid: self.orders[txid]})
+        if endpoint in ("OpenOrders", "ClosedOrders"):
+            wanted = dict(urllib.parse.parse_qsl(request.content.decode())).get("cl_ord_id")
+            is_open = endpoint == "OpenOrders"
+            found = {
+                txid: order
+                for txid, order in self.orders.items()
+                if (order["status"] in ("open", "pending")) == is_open
+                and (wanted is None or order["cl_ord_id"] == wanted)
+            }
+            return _ok({"open" if is_open else "closed": found})
         return httpx.Response(404)
+
+    def _add_order(self, form):
+        self.placed.append(form)
+        if self.on_add_order is not None:
+            self.on_add_order(form)
+        if self.add_order_errors:
+            return httpx.Response(200, json={"error": self.add_order_errors, "result": {}})
+        if form.get("validate") == "true":
+            return _ok({"descr": {"order": f"buy {form['volume']} {form['pair']} @ market"}})
+        if self.lose_add_order == "dropped":
+            return httpx.Response(503)
+        txid = f"OTX{len(self.orders) + 1:03d}-AAAAA-BBBBBB"
+        spent = Decimal(form["volume"])
+        price = Decimal(self.prices[form["pair"]])
+        filled = self.fill_status == "closed"
+        self.orders[txid] = {
+            "status": self.fill_status,
+            "cl_ord_id": form["cl_ord_id"],
+            "oflags": form.get("oflags", ""),
+            "vol": form["volume"],
+            "vol_exec": str((spent / price).quantize(Decimal("0.00000001"))) if filled else "0",
+            "cost": str(spent) if filled else "0",
+            "fee": str((spent * Decimal("0.004") / price).quantize(Decimal("0.00000001"))) if filled else "0",
+            "price": str(price) if filled else "0",
+        }
+        if self.lose_add_order == "executed":
+            return httpx.Response(503)
+        return _ok({"descr": {"order": f"buy {form['volume']} {form['pair']} @ market"}, "txid": [txid]})
 
 
 class FakeGoogle:
@@ -191,13 +251,39 @@ def fake_kraken() -> FakeKraken:
     return FakeKraken()
 
 
+class FakeLocks:
+    """The per-user lock, without a second connection. A test puts a user in `held` to
+    stand for an evaluation already running."""
+
+    def __init__(self):
+        self.held = set()
+
+    @contextmanager
+    def __call__(self, user_id):
+        if user_id in self.held:
+            yield False
+            return
+        self.held.add(user_id)
+        try:
+            yield True
+        finally:
+            self.held.discard(user_id)
+
+
+@pytest.fixture
+def user_locks() -> FakeLocks:
+    return FakeLocks()
+
+
 @pytest.fixture
 def fake_google() -> FakeGoogle:
     return FakeGoogle()
 
 
 @pytest.fixture
-def app_context(db_session: Session, fake_kraken: FakeKraken, fake_google: FakeGoogle) -> AppContext:
+def app_context(
+    db_session: Session, fake_kraken: FakeKraken, fake_google: FakeGoogle, user_locks: FakeLocks
+) -> AppContext:
     """The application's dependencies, with every provider fake and the database real."""
     config = AppConfig(
         database_url="postgresql+psycopg://unused",
@@ -239,6 +325,7 @@ def app_context(db_session: Session, fake_kraken: FakeKraken, fake_google: FakeG
         # One clock for the whole application: the tokens expire on the time the test fixes.
         signer=TokenSigner(config.jwt_secret, config.jwt_ttl, now=lambda: FIXED_NOW),
         catalog=MarketCatalog(KrakenClient(kraken_http, limiter), lambda: FIXED_NOW),
+        user_lock=user_locks,
         now=lambda: FIXED_NOW,
     )
 

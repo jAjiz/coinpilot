@@ -11,7 +11,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.exc import TimeoutError as PoolTimeout
 
 from api.context import AppContext
-from api.routes import assets, auth, config, credentials, health, history, portfolio
+from api.routes import assets, auth, config, credentials, health, history, invest, portfolio
 
 logger = logging.getLogger("coinpilot.api")
 
@@ -63,6 +63,7 @@ def create_app(context: AppContext) -> FastAPI:
         config.router,
         assets.router,
         portfolio.router,
+        invest.router,
         history.router,
     ):
         app.include_router(router)
