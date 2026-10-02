@@ -82,7 +82,8 @@ in the task that owns it.
 | `oflags`: `fciq` is "prefer fee in quote currency (default if buying, mutually exclusive with `fcib`)"; `fcib` is "prefer fee in base currency (default if selling)" | [AddOrder](https://docs.kraken.com/api-reference/trading/add-order) |
 | `viqc` is accepted on buy market orders only, so a sell is placed as a volume of the base asset | [AddOrder](https://docs.kraken.com/api-reference/trading/add-order) |
 | A buy placed with `viqc,fcib` reports `cost` in fiat, `vol_exec` in the asset (gross), and `fee` in fiat | Verified on the first real order, spec §9.1 |
-| **Open:** that a sell placed with `fciq` reports `cost` as the gross proceeds in fiat and `fee` in fiat, so that `cost − fee` is what reached the account | Verified on the first real sell |
+| A sell reports `cost` as the gross proceeds in fiat, `vol_exec × price`, and `fee` in fiat. A past limit sell of the user's, 1.67940915 ETH at an average of 1,487.18 EUR, shows `cost` 2,497.60049 EUR (the sum of its two trades) and `fee` 4.9952 EUR | The user's order `OAQXD6-7GLKC-VPNFRN` |
+| **Open:** that a sell placed with `fciq` *takes* its fee in fiat, so that `cost − fee` is what reached the account. The order above does not settle it: the first buy also reported its fee in fiat although Kraken took it in the asset | Kraken's ledger for the first real sell |
 
 **Why `fciq` on every sell.** By Kraken's default a sell pays its fee in the asset sold.
 An exit that sells the whole balance would then lack the asset to pay the fee, and every
