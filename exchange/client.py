@@ -251,6 +251,21 @@ class KrakenClient:
             if isinstance(entry, dict) and entry.get("altname")
         }
 
+    def asset_decimals(self) -> dict[str, int] | None:
+        """The places Kraken's ledger keeps for each asset, by short name: `EUR` to 4.
+
+        An order reports its cost and fee with more places than that. What moves the
+        balance is the ledger's entry, rounded to these.
+        """
+        raw = self._public("Assets")
+        if raw is None:
+            return None
+        return {
+            str(entry["altname"]): int(entry["decimals"])
+            for entry in raw.values()
+            if isinstance(entry, dict) and entry.get("altname") and entry.get("decimals") is not None
+        }
+
     # ----- private data ----------------------------------------------------
 
     def api_key_info(self) -> dict | None:
@@ -287,7 +302,9 @@ class KrakenClient:
 
         `in_quote=True` makes `volume` an amount of the quote currency and takes the fee
         in the asset bought (`viqc`, `fcib`), so the order spends exactly that amount
-        (spec §9.1). Kraken accepts it on buys only. `validate=True` has Kraken check the
+        (spec §9.1). Kraken accepts it on buys only. A sell always pays its fee in the
+        quote currency (`fciq`): the volume sent is the volume sold, so selling a whole
+        balance leaves nothing owed in the asset. `validate=True` has Kraken check the
         order and never trade it.
 
         Never `None`. This is the one call where *Kraken refused* and *nobody knows* must be
@@ -304,6 +321,8 @@ class KrakenClient:
         }
         if in_quote:
             payload["oflags"] = "viqc,fcib"
+        elif side == "sell":
+            payload["oflags"] = "fciq"
         if validate:
             payload["validate"] = "true"
 

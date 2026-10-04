@@ -219,11 +219,7 @@ class Order(TimestampMixin, Base):
 
 
 class Proposal(TimestampMixin, Base):
-    """At most one per user.
-
-    A later phase owns the transitions between the statuses. This one owns the row and
-    the rule that there is only ever one.
-    """
+    """At most one per user. `core/rebalance.py` owns the transitions between the statuses."""
 
     __tablename__ = "proposal"
 

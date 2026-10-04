@@ -3,6 +3,7 @@ from decimal import Decimal
 import pytest
 
 from exchange.precision import (
+    credited,
     format_decimal,
     is_orderable,
     minimum_fiat,
@@ -143,3 +144,12 @@ def test_the_minimum_is_the_cost_minimum_when_the_volume_minimum_is_cheaper():
 def test_the_minimum_follows_the_price_when_the_volume_minimum_is_dearer():
     # 0.00005 BTC at 200 000 is 10.
     assert minimum_fiat(BTC, D("200000")) == D("10")
+
+
+def test_a_sell_credits_what_the_ledger_shows_not_what_the_order_reports():
+    """The first real sell: 14.93414 and a fee of 0.11947 left 14.8146 EUR."""
+    assert credited(Decimal("14.93414"), Decimal("0.11947"), 4) == Decimal("14.8146")
+
+
+def test_a_sell_already_at_the_ledgers_places_is_credited_as_reported():
+    assert credited(Decimal("200"), Decimal("0.8"), 4) == Decimal("199.2")

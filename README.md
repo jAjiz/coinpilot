@@ -1,7 +1,8 @@
 # CoinPilot
 
-> **Status: in development.** Phase 5 of 8: free cash is invested on request with
-> `POST /invest`, after an optional preview Kraken validates. Nothing runs on its own yet.
+> **Status: in development.** Phase 6 of 8: free cash is invested on request with
+> `POST /invest`, and a rebalance is proposed with `POST /rebalance` and executed once
+> approved with `POST /proposal/approve`. Nothing runs on its own yet.
 
 A multi-tenant service that keeps a crypto portfolio at the target allocation its owner
 declared, on Kraken. It does two things, and they matter equally:

@@ -194,10 +194,11 @@ class EvaluationOut(BaseModel):
 
 
 class LegOut(BaseModel):
-    """One leg of an investment. Every amount is a plain decimal string."""
+    """One leg of an operation. Every amount is a plain decimal string."""
 
     asset: str
     pair: str
+    side: str
     amount_fiat: str
     minimum_fiat: str | None
     status: str
@@ -209,10 +210,49 @@ class LegOut(BaseModel):
     fee: str | None
     error: str | None
     note: str | None
+    # A sell's volume of the asset. A buy is placed in fiat and has none.
+    volume: str | None
 
 
 class InvestOut(BaseModel):
     status: str
     preview: bool
     legs: list[LegOut]
+    messages: list[str]
+
+
+class ProposalLegOut(BaseModel):
+    """One leg as it was proposed, the skipped ones too, with why."""
+
+    asset: str
+    pair: str
+    side: str
+    amount_fiat: str
+    minimum_fiat: str | None
+    note: str | None
+
+
+class ProposalOut(BaseModel):
+    version: int
+    status: str
+    trigger: str
+    fiat: str
+    legs: list[ProposalLegOut]
+    updated_at: datetime
+
+
+class ApproveIn(BaseModel):
+    """The version read. An approval of any other is refused (spec §8)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    version: int = Field(ge=1)
+
+
+class RebalanceOut(BaseModel):
+    status: str
+    # What was sent. Empty for a proposal, which sends nothing.
+    legs: list[LegOut]
+    # The live proposal as the evaluation left it. `null` when there is none.
+    proposal: ProposalOut | None
     messages: list[str]
