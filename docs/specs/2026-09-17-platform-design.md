@@ -112,11 +112,16 @@ there is drift. It is deliberately **not** "every tick" — the on-demand refres
 from 15 January". Occurrences are `anchor + k x interval`. Below a day the anchor
 carries no meaning and is ignored; §10.2 covers how it coexists with staggering.
 
+The anchor is an instant, stored in UTC. A user who means 09:00 where clocks change for
+summer runs an hour apart in summer and in winter. The stagger already spreads a run over
+an hour; a time zone per user is deferred.
+
 **Cadence says when to look. `min_drift_pct` says whether to act.**
 
-If both cadences fall due on the same tick, there is one balance read and two
-operations: the invest operation executes, and the rebalance operation is proposed or
-executed according to the switch.
+If both cadences fall due on the same tick, there are two evaluations, the invest
+operation first: it executes, and the rebalance operation then reads the balance it left
+and is proposed or executed according to the switch. One shared read would plan the
+rebalance on a balance the investment had already changed.
 
 ## 4. Architecture
 
@@ -124,13 +129,13 @@ executed according to the switch.
 
 | Service | Contents |
 |---|---|
-| `platform` | FastAPI + APScheduler: engine, REST API and scheduler in one process |
+| `platform` | FastAPI and a scheduler thread: engine, REST API and scheduler in one process |
 | `postgres` | All state |
 
 Two containers. There is no messaging service and no dashboard service; the project 2
 application replaces both.
 
-**Language and stack: Python 3.13**, with FastAPI, SQLAlchemy, Alembic and APScheduler.
+**Language and stack: Python 3.13**, with FastAPI, SQLAlchemy and Alembic.
 This is a decision with reasons behind it, not a default — see §14.
 
 ### 4.2 Layers
@@ -235,12 +240,12 @@ Every table carries `user_id`. There are no singleton rows.
 | `users` | OAuth identity: provider, subject, email, status. UUID primary key, so row counts are not leaked. |
 | `refresh_tokens` | One row per refresh token: SHA-256, family, expiry, used and revoked timestamps. Expired rows are deleted by retention. |
 | `user_credentials` | Encrypted Kraken key and secret, nonce, master-key version, validation timestamp. |
-| `user_settings` | One row per user: `fiat`, `invest_cash_enabled`, `cash_rebalance_enabled`, `auto_rebalance_enabled`, `min_drift_pct`, `min_order_fiat`, both cadences, `next_invest_at`, `next_rebalance_at`, `paused`. |
+| `user_settings` | One row per user: `fiat`, `invest_cash_enabled`, `cash_rebalance_enabled`, `auto_rebalance_enabled`, `min_drift_pct`, `min_order_fiat`, both cadences, `next_invest_at`, `next_rebalance_at`, `paused`, `failure_streak`. |
 | `asset_config` | One row per user and asset: resolved pair, `target_pct`. |
 | `orders` | Every order attempted: `cl_ord_id`, txid, reason, status, requested amount, cost, executed volume, price, fee, and Kraken's error code when it refused the order. |
 | `proposal` | The live proposal, at most one per user: version, plan, trigger, status. |
-| `portfolio_snapshots` | Time series of portfolio value. |
-| `sessions` | One row per user evaluation: status, duration, captured log lines. |
+| `portfolio_snapshots` | Time series of portfolio value: one point a day, overwritten by each read of that day, and one kept (`pinned`) before every operation that sent orders. |
+| `sessions` | One row per user evaluation: what it was for (`operation`), who started it (`trigger`), status, duration, captured log lines. |
 
 Settings types: `min_drift_pct` is `Numeric(4,1)`, `min_order_fiat` is `Numeric(10,1)`.
 Defaults: `invest_cash_enabled` off (§3.4), and `min_order_fiat` 0, which means Kraken's
@@ -314,7 +319,7 @@ At most one live proposal per user, recalculated at every evaluation.
 
 A proposal always represents a **rebalance operation**. Invest operations never produce
 one, and neither does a rebalance while automatic rebalancing is enabled: that executes
-directly.
+directly, and withdraws a live proposal first, since what executes is today's plan.
 
 **The version increments only on a material change**: a leg appears or disappears, or a
 leg's amount moves by more than its effective minimum, the larger of `min_order_fiat`
@@ -485,8 +490,19 @@ The scheduler ticks on a fixed short interval (environment parameter, default 60
 tick runs one indexed query: the users whose `next_invest_at` or `next_rebalance_at` has
 passed. Which one is due decides whether the plan may contain sells.
 
+What the selection read can change before anything is sent. The module that sends reads
+the settings again under the user's lock, just before the first order: a scheduled
+investment sends nothing once `invest_cash_enabled` is off or the user is `paused`, and an
+automatic rebalance nothing once `auto_rebalance_enabled` is off or the user is `paused`.
+Either ends `NOTHING_TO_DO` and says why. An investment by hand (`POST /invest`) is the
+user asking, and neither setting applies to it.
+
 Public prices are fetched **once per tick and shared**. Only private calls multiply per
 user, and since Kraken's rate limit is counted per key, those calls do not contend.
+A tick reads the prices of every pair its batch is configured with in one `Ticker` call,
+and a pair it missed — an unmanaged holding — once more, kept for the rest of the tick.
+Asset names and pairs come from the daily catalog, never from a call per evaluation:
+every public call in the process shares one bucket.
 
 ### 10.2 Staggering
 
@@ -509,7 +525,8 @@ the same user. Intent is honoured to the hour, and a thousand monthly users spre
 offset spreads across the whole interval.
 
 A missed run — the system was down — recomputes **forward** to the next slot. One
-evaluation, never three accumulated.
+evaluation, never three accumulated. A pause is different: the user chose it, so lifting
+it moves both next runs to the first slot after now, and nothing missed while paused runs.
 
 Each tick processes a **bounded batch**. After an outage every user is overdue at once,
 and without a cap the recovery is a stampede at the worst possible moment.
@@ -554,6 +571,21 @@ freshness from the scheduler's cadence.
 One user's failure is recorded and skipped; the rest of the tick proceeds. Alerting is
 edge-triggered on a per-user failure streak: one message when the streak crosses the
 threshold and one when it recovers, never one per failure.
+
+A failure is a scheduled operation that ends `ERROR` or `KRAKEN_UNAVAILABLE`, or raises.
+An unresolved order counts only when Kraken did not answer the lookup (§9.2); one that
+is merely not listed yet is a wait and does not count, and a refused order is Kraken's
+answer and does not count either. A user without a key yet is skipped without counting.
+The streak is `user_settings.failure_streak`, so a restart does not reset it. The alert
+is a log line until project 2 brings notifications.
+
+Retention runs on the first tick of each UTC day. A retention that fails is logged and
+tried again on the next tick, and the tick goes on to the users due: housekeeping never
+stops an evaluation.
+
+A scheduler log line names the user by id and nothing else about them. A database error's
+text omits the statement's bound values (the engine hides them), since those are balances
+and amounts read with the user's key.
 
 ## 11. API surface
 
@@ -663,6 +695,9 @@ Non-obvious decisions a reviewer would otherwise question.
   reading a proposal and approving it. Executing the stored amounts would sell on stale
   prices; recomputing and comparing executes what is true now, and only when it is what
   the user agreed to.
+- **A thread, not APScheduler.** The scheduler is one job every 60 seconds. A loop around
+  an event's wait does that, and the tick is a plain method a test calls with a fixed
+  clock. A scheduling library would add a dependency and a job store for nothing used.
 - **Cadence is the load regulator, not just a preference.** The private call per user is
   the cost driver, so the cadence is what makes multi-tenancy affordable. `MIN` is the
   expensive class and is bounded by an environment floor.

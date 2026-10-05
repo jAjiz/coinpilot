@@ -2,8 +2,9 @@
 
 A rebalance sells, and a sell cannot be undone. So a request to rebalance never sends
 anything: `propose` computes the plan and keeps it as the user's one live proposal, and
-`approve` executes it once the user has read it. The executor sends; this module decides
-whether there is anything to send.
+`approve` executes it once the user has read it. The one exception is the user who turned
+automatic rebalancing on, which is the authorisation: for them the scheduler calls
+`rebalance_now`. The executor sends; this module decides whether there is anything to send.
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ from sqlalchemy.orm import Session
 
 import core.database as db
 from core.db.models import Proposal
-from core.db.types import OrderReason, ProposalStatus, ProposalTrigger
+from core.db.types import Operation, OrderReason, ProposalStatus, ProposalTrigger, Trigger
 from core.execution import EvaluationResult, EvaluationStatus, ExecutionContext, Planned, evaluate
 from core.proposal_plan import has_orders, is_material, plan_document
 
@@ -63,20 +64,31 @@ def withdraw(context: ExecutionContext, user_id: uuid.UUID) -> bool:
         return db.withdraw(session, user_id)
 
 
-def propose(context: ExecutionContext, user_id: uuid.UUID) -> RebalanceResult:
+def propose(
+    context: ExecutionContext, user_id: uuid.UUID, *, trigger: Trigger = Trigger.API
+) -> RebalanceResult:
     """Compute a rebalance and keep it as the live proposal. Never sends an order.
 
-    Not even with automatic rebalancing on: a rebalance executed without an approval is
-    the scheduler's, in phase 7. Raises what `evaluate` raises.
+    The scheduler calls it too, with `Trigger.SCHEDULER`, for a user whose automatic
+    rebalancing is off. Raises what `evaluate` raises.
     """
+    proposal_trigger = ProposalTrigger.SCHEDULED if trigger is Trigger.SCHEDULER else ProposalTrigger.MANUAL
 
     def decide(planned: Planned, log: list[str]) -> EvaluationStatus:
         document = plan_document(planned.view.fiat, planned.legs)
         with context.sessions() as session:
-            _keep(session, user_id, document, ProposalTrigger.MANUAL, log)
+            _keep(session, user_id, document, proposal_trigger, log)
         return EvaluationStatus.PROPOSED if has_orders(document) else EvaluationStatus.NOTHING_TO_DO
 
-    result = evaluate(context, user_id, allow_sells=True, reason=OrderReason.REBALANCE, decide=decide)
+    result = evaluate(
+        context,
+        user_id,
+        allow_sells=True,
+        reason=OrderReason.REBALANCE,
+        decide=decide,
+        operation=Operation.PROPOSE,
+        trigger=trigger,
+    )
     return RebalanceResult(result, current(context, user_id))
 
 
@@ -123,7 +135,15 @@ def approve(context: ExecutionContext, user_id: uuid.UUID, version: int) -> Reba
         return None
 
     try:
-        result = evaluate(context, user_id, allow_sells=True, reason=OrderReason.REBALANCE, decide=decide)
+        result = evaluate(
+            context,
+            user_id,
+            allow_sells=True,
+            reason=OrderReason.REBALANCE,
+            decide=decide,
+            operation=Operation.APPROVE,
+            trigger=Trigger.API,
+        )
     finally:
         # Even when the evaluation raised: orders may have gone out, and a proposal left
         # EXECUTING would be neither live nor done.
@@ -131,6 +151,42 @@ def approve(context: ExecutionContext, user_id: uuid.UUID, version: int) -> Reba
             with context.sessions() as session:
                 db.set_status(session, user_id, ProposalStatus.EXECUTED)
     return RebalanceResult(result, current(context, user_id))
+
+
+def rebalance_now(context: ExecutionContext, user_id: uuid.UUID) -> EvaluationResult:
+    """Execute a rebalance without an approval. Only the scheduler calls this, and only for
+    a user with automatic rebalancing on: enabling it was the authorisation (spec §3.4).
+
+    The settings are read again under the lock, just before anything is sent: a user who
+    switched it off, or paused, since the scheduler chose them is not sold from. A live
+    proposal is withdrawn first. It was computed earlier, and what executes is today's
+    plan; left live, it would offer an approval of something already done.
+    """
+
+    def decide(planned: Planned, log: list[str]) -> EvaluationStatus | None:
+        with context.sessions() as session:
+            settings = db.get_settings(session, user_id)
+            if settings is None or not settings.auto_rebalance_enabled:
+                log.append("automatic rebalancing was switched off; nothing was sent")
+                return EvaluationStatus.NOTHING_TO_DO
+            if settings.paused:
+                log.append("scheduled operations are paused; nothing was sent")
+                return EvaluationStatus.NOTHING_TO_DO
+            slot = db.get_live_proposal(session, user_id)
+            if slot is not None:
+                db.withdraw(session, user_id)
+                log.append(f"automatic rebalancing is on; proposal version {slot.version} was withdrawn")
+        return None
+
+    return evaluate(
+        context,
+        user_id,
+        allow_sells=True,
+        reason=OrderReason.REBALANCE,
+        decide=decide,
+        operation=Operation.REBALANCE,
+        trigger=Trigger.SCHEDULER,
+    )
 
 
 def _keep(

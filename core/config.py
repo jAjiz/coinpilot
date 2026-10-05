@@ -30,6 +30,26 @@ class GoogleConfig:
 
 
 @dataclass(frozen=True)
+class SchedulerConfig:
+    """The scheduler's settings (spec §10). The defaults are the spec's."""
+
+    # Off unless the environment turns it on: a test that builds an `AppConfig` by hand
+    # must not start a thread. `load_config` defaults it to on.
+    enabled: bool = False
+    tick: timedelta = timedelta(seconds=60)
+    # Users per tick at most. After an outage every user is due at once (spec §10.2).
+    batch: int = 50
+    workers: int = 4
+    # `MIN`: the system minimum cadence (spec §3.5).
+    min_cadence: timedelta = timedelta(minutes=15)
+    # How far after an `INTERVAL` anchor the users are spread (spec §10.2).
+    window: timedelta = timedelta(hours=1)
+    # Failures in a row before the one warning (spec §10.5).
+    alert_streak: int = 3
+    sessions_retention: timedelta = timedelta(days=90)
+
+
+@dataclass(frozen=True)
 class AppConfig:
     # The URL carries the database password.
     database_url: str = field(repr=False)
@@ -41,6 +61,7 @@ class AppConfig:
     google: GoogleConfig
     credential_keys: Mapping[int, bytes] = field(repr=False)
     credential_key_version: int
+    scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
 
 
 def database_url() -> str:
@@ -80,6 +101,33 @@ def load_config(environ: Mapping[str, str]) -> AppConfig:
         ),
         credential_keys=keys,
         credential_key_version=version,
+        scheduler=_scheduler(environ),
+    )
+
+
+def _scheduler(environ: Mapping[str, str]) -> SchedulerConfig:
+    defaults = SchedulerConfig()
+
+    def seconds(name: str, default: timedelta) -> timedelta:
+        return timedelta(seconds=_positive(environ, name, default=int(default.total_seconds())))
+
+    return SchedulerConfig(
+        enabled=_flag(environ, "SCHEDULER_ENABLED", default=True),
+        tick=seconds("SCHEDULER_TICK_SECONDS", defaults.tick),
+        batch=_positive(environ, "SCHEDULER_BATCH", default=defaults.batch),
+        workers=_positive(environ, "SCHEDULER_WORKERS", default=defaults.workers),
+        min_cadence=timedelta(
+            minutes=_positive(
+                environ,
+                "SCHEDULER_MIN_CADENCE_MINUTES",
+                default=int(defaults.min_cadence.total_seconds()) // 60,
+            )
+        ),
+        window=seconds("SCHEDULER_WINDOW_SECONDS", defaults.window),
+        alert_streak=_positive(environ, "SCHEDULER_ALERT_STREAK", default=defaults.alert_streak),
+        sessions_retention=timedelta(
+            days=_positive(environ, "SESSIONS_RETENTION_DAYS", default=defaults.sessions_retention.days)
+        ),
     )
 
 

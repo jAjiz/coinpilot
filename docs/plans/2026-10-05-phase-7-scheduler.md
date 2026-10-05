@@ -2991,3 +2991,9 @@ repository.
 
 | Where | What changed | Why |
 |---|---|---|
+| Task 7, `rebalance_now` | Re-reads `auto_rebalance_enabled` under the user lock before any order and sends nothing (`NOTHING_TO_DO`) if it is off. | The switch may have been turned off since the evaluation was scheduled. |
+| Task 7, failure streak | A failed PENDING lookup counts toward the failure streak, via `EvaluationResult.lookup_failed`. | Spec §9.2 is binding; an order merely not listed yet still does not count. |
+| Task 3, `record_snapshot` | It did not gain a `pinned` parameter; pinning goes only through `pin_snapshot`. | One way to pin keeps the one-point-a-day rule in one place. |
+| Task 9, README | The stack line drops APScheduler. | APScheduler is not used. |
+| Final review, `invest` and `rebalance_now` | A scheduled `invest` re-reads the settings under the user lock before any order and sends nothing (`NOTHING_TO_DO`) if `invest_cash_enabled` is off or the user is `paused`; `rebalance_now` also stops on `paused`. `POST /invest` is unchanged. | Review Focus #2 was enforced only by a read outside the lock; the same rule as Ruling F5. A by-hand investment is the user asking (spec §3.4). |
+| Final review, engine | The engine is created with `hide_parameters=True`. | Scheduler tracebacks would otherwise log bound values (balances, order amounts) read with the user's key. |

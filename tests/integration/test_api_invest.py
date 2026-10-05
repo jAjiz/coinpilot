@@ -104,3 +104,13 @@ def test_kraken_down_is_a_503_and_nothing_is_sent(api, make_user, login, fake_kr
     assert response.status_code == 503
     assert [form for form in fake_kraken.placed if form.get("validate") != "true"] == []
     assert [row["status"] for row in api.get("/sessions", headers=headers).json()] == ["KRAKEN_UNAVAILABLE"]
+
+
+def test_the_history_says_what_each_evaluation_was(api, make_user, login, fake_kraken):
+    headers = login(make_user())
+    _ready(api, headers, fake_kraken)
+
+    api.post("/invest", headers=headers)
+
+    [entry] = api.get("/sessions", headers=headers).json()
+    assert (entry["operation"], entry["trigger"]) == ("INVEST", "API")

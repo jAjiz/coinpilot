@@ -26,11 +26,14 @@ def create_engine_from_url(url: str) -> Engine:
     """Build an engine.
 
     `pool_pre_ping` costs one round trip and survives a dropped connection, which a
-    long-lived scheduler process will meet.
+    long-lived scheduler process will meet. `hide_parameters` keeps bound values out of
+    an error's text: they are balances and order amounts read with a user's key, and an
+    error's text reaches the log.
     """
     return create_engine(
         url,
         pool_pre_ping=True,
+        hide_parameters=True,
         future=True,
         connect_args={"connect_timeout": CONNECT_TIMEOUT_SECONDS},
     )

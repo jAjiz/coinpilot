@@ -2,20 +2,26 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
+from sqlalchemy import event, update
 from sqlalchemy.orm import Session
 
+from core.db.models import PortfolioSnapshot
 from core.db.telemetry import (
     delete_evaluations_before,
     finish_evaluation,
+    keep_snapshot,
     latest_snapshot,
     list_evaluations,
+    pin_snapshot,
     record_snapshot,
     snapshots_since,
     start_evaluation,
 )
+from core.db.types import Operation, Trigger
 
 D = Decimal
 NOW = datetime(2026, 9, 17, 12, 0, tzinfo=UTC)
+DAY = datetime(2026, 10, 5, 9, 0, tzinfo=UTC)
 HOLDINGS = {
     "BTC": {"amount": "0.5", "value": "24000.00", "managed": True},
     "DOGE": {"amount": "1000", "value": "80.00", "managed": False},
@@ -131,3 +137,89 @@ def test_retention_sweeps_every_user_at_once(db_session: Session, make_user):
         start_evaluation(db_session, make_user().id, started_at=NOW - timedelta(days=400))
 
     assert delete_evaluations_before(db_session, cutoff=NOW - timedelta(days=365)) == 2
+
+
+def _keep(session: Session, user_id, as_of: datetime, total: str = "100"):
+    return keep_snapshot(
+        session, user_id, as_of=as_of, fiat="EUR", total_value=D(total), cash=D("10"), holdings={}
+    )
+
+
+def _series(session: Session, user_id):
+    return snapshots_since(session, user_id, DAY - timedelta(days=1))
+
+
+def test_a_second_read_of_the_same_day_overwrites_the_days_point(db_session: Session, make_user):
+    """A reader every 15 minutes would otherwise write 96 near-identical rows a day."""
+    user = make_user()
+    first = _keep(db_session, user.id, DAY, "100")
+
+    second = _keep(db_session, user.id, DAY + timedelta(hours=6), "110")
+
+    assert second.id == first.id
+    assert len(_series(db_session, user.id)) == 1
+    assert (second.as_of, second.total_value) == (DAY + timedelta(hours=6), D("110"))
+
+
+def test_a_read_on_a_new_day_adds_a_point(db_session: Session, make_user):
+    user = make_user()
+    _keep(db_session, user.id, DAY)
+
+    _keep(db_session, user.id, DAY + timedelta(days=1))
+
+    assert len(_series(db_session, user.id)) == 2
+
+
+def test_a_pinned_snapshot_is_never_overwritten(db_session: Session, make_user):
+    user = make_user()
+    pinned = _keep(db_session, user.id, DAY, "100")
+    pin_snapshot(db_session, user.id, pinned.id)
+
+    later = _keep(db_session, user.id, DAY + timedelta(hours=1), "120")
+    again = _keep(db_session, user.id, DAY + timedelta(hours=2), "130")
+
+    assert later.id != pinned.id
+    assert again.id == later.id
+    assert pinned.total_value == D("100")
+    assert [snapshot.pinned for snapshot in _series(db_session, user.id)] == [True, False]
+
+
+def test_a_pin_from_another_session_is_seen_and_the_row_is_locked_while_deciding(
+    db_session: Session, make_user
+):
+    """A refresh racing an evaluation's pin: the latest row is locked and read afresh, so a
+    pin that landed first is seen, and one that lands later waits for the decision."""
+    user = make_user()
+    kept = _keep(db_session, user.id, DAY, "100")
+    # The pin as another session commits it: behind this session's back, not through its objects.
+    db_session.execute(update(PortfolioSnapshot).where(PortfolioSnapshot.id == kept.id).values(pinned=True))
+    statements = []
+
+    def listen(conn, cursor, statement, *rest):
+        statements.append(statement)
+
+    event.listen(db_session.connection(), "before_cursor_execute", listen)
+    try:
+        later = _keep(db_session, user.id, DAY + timedelta(hours=1), "120")
+    finally:
+        event.remove(db_session.connection(), "before_cursor_execute", listen)
+
+    assert later.id != kept.id
+    assert any("FOR UPDATE" in statement for statement in statements)
+
+
+def test_a_snapshot_cannot_be_pinned_by_another_user(db_session: Session, make_user):
+    alice, bob = make_user("alice@example.test"), make_user("bob@example.test")
+    snapshot = _keep(db_session, alice.id, DAY)
+
+    pin_snapshot(db_session, bob.id, snapshot.id)
+
+    assert snapshot.pinned is False
+
+
+def test_an_evaluation_records_what_it_was_for_and_who_started_it(db_session: Session, make_user):
+    record = start_evaluation(
+        db_session, make_user().id, started_at=NOW, operation=Operation.INVEST, trigger=Trigger.SCHEDULER
+    )
+
+    assert (record.operation, record.trigger) == ("INVEST", "SCHEDULER")

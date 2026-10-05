@@ -6,8 +6,8 @@ bucket paced at a call a second, so a burst of users queued behind each other wh
 request held a database connection.
 
 A copy up to a day old is accepted: an asset Kraken lists today may be refused until the
-next read. Nothing that values a portfolio or places an order reads from here; those read
-Kraken live.
+next read. Evaluations read names and pairs from here too (`core.public_market`). Prices
+are never kept here: they are read live, or once per scheduler tick.
 """
 
 from __future__ import annotations

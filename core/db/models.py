@@ -132,6 +132,8 @@ class UserSettings(TimestampMixin, Base):
     next_rebalance_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     paused: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Scheduled operations that failed in a row. The alert fires on its edges (spec §10.5).
+    failure_streak: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
 
     # One indexed query per tick. The partial predicate keeps a paused user out of the
     # index entirely rather than out of the result.
@@ -241,7 +243,13 @@ class Proposal(TimestampMixin, Base):
 
 
 class PortfolioSnapshot(Base):
-    """A point in the value series. Rows are inserted and never updated."""
+    """A point in the value series.
+
+    One a day, overwritten by each read of that day, and one kept before every operation
+    that sent orders. Reading every 15 minutes would otherwise write 96 near-identical
+    rows a day, and the series cannot be thinned afterwards without losing which rows
+    mattered.
+    """
 
     __tablename__ = "portfolio_snapshots"
 
@@ -256,6 +264,9 @@ class PortfolioSnapshot(Base):
     # Holds the unmanaged assets too, each flagged, so the user sees their real account
     # rather than a partial view of it.
     holdings: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    # Taken before orders were sent: kept as it is. An unpinned point is the day's, and
+    # the next read of the same day overwrites it.
+    pinned: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -283,6 +294,10 @@ class EvaluationSession(Base):
     # values over time, and a constraint here would make each one a migration while
     # protecting nothing that matters. Wide enough for the longest, `KRAKEN_UNAVAILABLE`.
     status: Mapped[str] = mapped_column(String(32), nullable=False)
+    # What it was for and who started it: `Operation` and `Trigger`. No check constraint,
+    # like `status`. Null on rows written before the scheduler.
+    operation: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    trigger: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # Text, not JSONB: fetched whole and never queried into.
     log_messages: Mapped[str | None] = mapped_column(Text, nullable=True)
 

@@ -38,3 +38,30 @@ def advisory_user_lock(engine: Engine, user_id: uuid.UUID) -> Iterator[bool]:
             if taken:
                 connection.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": key})
                 connection.commit()
+
+
+# The scheduler's tick, across processes. Two 32-bit keys: PostgreSQL keeps that key space
+# apart from the single 64-bit keys the user locks take, so the two never collide.
+SCHEDULER_LOCK = (0x636F696E, 1)
+
+
+@contextmanager
+def advisory_scheduler_lock(engine: Engine, key: tuple[int, int] = SCHEDULER_LOCK) -> Iterator[bool]:
+    """Yields whether this process may run the tick. It never waits: a second process,
+    or a second worker of the same one, skips the tick instead of queueing for it."""
+    first, second = key
+    with engine.connect() as connection:
+        taken = bool(
+            connection.execute(
+                text("SELECT pg_try_advisory_lock(:first, :second)"), {"first": first, "second": second}
+            ).scalar_one()
+        )
+        connection.commit()
+        try:
+            yield taken
+        finally:
+            if taken:
+                connection.execute(
+                    text("SELECT pg_advisory_unlock(:first, :second)"), {"first": first, "second": second}
+                )
+                connection.commit()

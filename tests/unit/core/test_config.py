@@ -3,7 +3,7 @@ from datetime import timedelta
 
 import pytest
 
-from core.config import ConfigError, database_url, load_config
+from core.config import ConfigError, SchedulerConfig, database_url, load_config
 
 
 def test_a_missing_database_url_raises_rather_than_defaulting(monkeypatch):
@@ -134,3 +134,55 @@ def test_the_repr_carries_no_secret():
     assert "j" * 32 not in text
     assert "dbpassword" not in text
     assert repr(MASTER_KEY) not in text
+
+
+def test_the_scheduler_is_on_with_the_specs_defaults():
+    assert load_config(_env()).scheduler == SchedulerConfig(enabled=True)
+
+
+def test_every_scheduler_setting_can_be_set():
+    scheduler = load_config(
+        _env(
+            SCHEDULER_ENABLED="false",
+            SCHEDULER_TICK_SECONDS="30",
+            SCHEDULER_BATCH="10",
+            SCHEDULER_WORKERS="2",
+            SCHEDULER_MIN_CADENCE_MINUTES="5",
+            SCHEDULER_WINDOW_SECONDS="600",
+            SCHEDULER_ALERT_STREAK="5",
+            SESSIONS_RETENTION_DAYS="30",
+        )
+    ).scheduler
+
+    assert scheduler == SchedulerConfig(
+        enabled=False,
+        tick=timedelta(seconds=30),
+        batch=10,
+        workers=2,
+        min_cadence=timedelta(minutes=5),
+        window=timedelta(seconds=600),
+        alert_streak=5,
+        sessions_retention=timedelta(days=30),
+    )
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "SCHEDULER_TICK_SECONDS",
+        "SCHEDULER_BATCH",
+        "SCHEDULER_WORKERS",
+        "SCHEDULER_MIN_CADENCE_MINUTES",
+        "SCHEDULER_WINDOW_SECONDS",
+        "SCHEDULER_ALERT_STREAK",
+        "SESSIONS_RETENTION_DAYS",
+    ],
+)
+def test_a_scheduler_setting_must_be_a_positive_integer(name):
+    with pytest.raises(ConfigError, match=name):
+        load_config(_env(**{name: "0"}))
+
+
+def test_a_config_built_by_hand_has_the_scheduler_off():
+    """Tests build `AppConfig` directly. None of them may start a thread by accident."""
+    assert SchedulerConfig().enabled is False

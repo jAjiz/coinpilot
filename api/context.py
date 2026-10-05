@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from core.catalog import MarketCatalog
 from core.config import AppConfig
 from core.crypto import CredentialCipher
+from core.public_market import Market
 from core.tokens import TokenSigner
 from exchange.client import KrakenClient
 from exchange.limits import KeyLimiter
@@ -38,10 +39,13 @@ class AppContext:
     catalog: MarketCatalog
     # One evaluation per user at a time (spec §9.6). Yields whether the lock was taken.
     user_lock: Callable[[uuid.UUID], AbstractContextManager[bool]]
+    # One scheduler tick at a time, across processes. Yields whether it was taken.
+    scheduler_lock: Callable[[], AbstractContextManager[bool]]
     now: Callable[[], datetime]
 
-    def public_kraken(self) -> KrakenClient:
-        return KrakenClient(self.kraken_http, self.limiter)
+    def public_kraken(self) -> Market:
+        """Kraken's public side: names and pairs from the catalog, prices live."""
+        return Market(self.catalog, KrakenClient(self.kraken_http, self.limiter))
 
     def kraken_for(self, credentials: Credentials) -> KrakenClient:
         """A client for one request. The limiter is shared, so pacing still counts per key."""

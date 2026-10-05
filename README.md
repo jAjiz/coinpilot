@@ -1,8 +1,9 @@
 # CoinPilot
 
-> **Status: in development.** Phase 6 of 8: free cash is invested on request with
-> `POST /invest`, and a rebalance is proposed with `POST /rebalance` and executed once
-> approved with `POST /proposal/approve`. Nothing runs on its own yet.
+> **Status: in development.** Phase 7 of 8: free cash is invested, and drift is looked
+> for, on each user's cadence. A rebalance found by the scheduler is proposed, or
+> executed when the user turned automatic rebalancing on. Everything also runs on
+> request: `POST /invest`, `POST /rebalance`, `POST /proposal/approve`.
 
 A multi-tenant service that keeps a crypto portfolio at the target allocation its owner
 declared, on Kraken. It does two things, and they matter equally:
@@ -34,7 +35,7 @@ Two sections are worth reading before the rest:
 
 This repository is the **platform**: identity, credentials, portfolio state, the
 reconciliation engine, order execution, the scheduler and the REST API. Python, with
-FastAPI, SQLAlchemy, Alembic and APScheduler.
+FastAPI, SQLAlchemy and Alembic.
 
 The application that consumes it — a mobile-consultable UI with notifications — is a
 separate project.

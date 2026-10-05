@@ -8,8 +8,8 @@ import pytest
 
 from core.db.orders import get_by_cl_ord_id, list_orders
 from core.db.settings import create_settings, update_settings, upsert_asset
-from core.db.telemetry import latest_snapshot, list_evaluations
-from core.db.types import OrderStatus
+from core.db.telemetry import latest_snapshot, list_evaluations, snapshots_since
+from core.db.types import OrderStatus, Trigger
 from core.db.users import save_credentials
 from core.execution import (
     EvaluationBusy,
@@ -320,3 +320,101 @@ def test_a_preview_with_something_unresolved_says_so_and_resolves_nothing(
     assert fake_kraken.placed == []
     (order,) = list_orders(db_session, user.id)
     assert order.status == OrderStatus.PENDING
+
+
+def test_the_snapshot_before_sent_orders_is_pinned(app_context, db_session, ready):
+    user = ready()
+
+    invest(app_context, user.id)
+
+    assert latest_snapshot(db_session, user.id).pinned is True
+
+
+def test_the_snapshot_is_pinned_before_the_first_order_leaves(app_context, db_session, fake_kraken, ready):
+    """If the process dies mid-operation, the account before it is still on record."""
+    user = ready()
+    seen = []
+    fake_kraken.on_add_order = lambda form: seen.append(latest_snapshot(db_session, user.id).pinned)
+
+    invest(app_context, user.id)
+
+    assert seen
+    assert all(seen)
+
+
+def test_reads_with_nothing_to_send_keep_one_point_for_the_day(app_context, db_session, fake_kraken, ready):
+    user = ready()
+    # 600 EUR of XBT and 400 EUR of ETH against 60/40, and no cash: nothing to invest.
+    fake_kraken.balance = {"ZEUR": "0", "XXBT": "0.012", "XETH": "0.16"}
+
+    first = invest(app_context, user.id)
+    second = invest(app_context, user.id)
+
+    assert (first.status, second.status) == (EvaluationStatus.NOTHING_TO_DO, EvaluationStatus.NOTHING_TO_DO)
+    series = snapshots_since(db_session, user.id, app_context.now() - timedelta(days=1))
+    assert [snapshot.pinned for snapshot in series] == [False]
+
+
+def test_an_evaluation_records_its_operation_and_trigger(app_context, db_session, ready):
+    user = ready()
+
+    invest(app_context, user.id)
+    invest(app_context, user.id, trigger=Trigger.SCHEDULER)
+
+    assert sorted((e.operation, e.trigger) for e in list_evaluations(db_session, user.id)) == [
+        ("INVEST", "API"),
+        ("INVEST", "SCHEDULER"),
+    ]
+
+
+def test_an_unresolved_order_says_whether_kraken_answered_the_lookup(app_context, fake_kraken, ready):
+    """Spec §9.2: a lookup that failed is the system failing; an order not listed yet is a wait."""
+    user = ready()
+    fake_kraken.lose_add_order = "dropped"
+    invest(app_context, user.id)
+    fake_kraken.lose_add_order = None
+
+    not_listed = invest(app_context, user.id)
+    fake_kraken.down.add("OpenOrders")
+    unanswered = invest(app_context, user.id)
+
+    assert (not_listed.status, not_listed.lookup_failed) == (EvaluationStatus.UNRESOLVED, False)
+    assert (unanswered.status, unanswered.lookup_failed) == (EvaluationStatus.UNRESOLVED, True)
+
+
+@pytest.mark.parametrize(
+    ("change", "said"),
+    [({"invest_cash_enabled": False}, "switched off"), ({"paused": True}, "paused")],
+)
+def test_a_scheduled_investment_reads_the_settings_again_under_the_lock(
+    app_context, db_session, fake_kraken, ready, user_locks, change, said
+):
+    """An investment switched off, or a user paused, after the scheduler chose them is not
+    spent from. The change lands the moment the lock is taken, after `invest` was called."""
+    user = ready()
+    update_settings(db_session, user.id, invest_cash_enabled=True)
+
+    @contextmanager
+    def changed_on_entry(user_id):
+        with user_locks(user_id) as taken:
+            update_settings(db_session, user_id, **change)
+            yield taken
+
+    context = replace(app_context, user_lock=changed_on_entry)
+
+    result = invest(context, user.id, trigger=Trigger.SCHEDULER)
+
+    assert result.status is EvaluationStatus.NOTHING_TO_DO
+    assert any(said in message for message in result.messages)
+    assert "AddOrder" not in fake_kraken.calls
+    assert list_orders(db_session, user.id) == []
+
+
+def test_an_investment_by_hand_needs_no_setting(app_context, fake_kraken, ready):
+    """`POST /invest` is the user asking: `invest_cash_enabled` governs the cadence only (spec §3.4)."""
+    user = ready()
+
+    result = invest(app_context, user.id)
+
+    assert result.status is EvaluationStatus.DONE
+    assert _sent(fake_kraken) != []

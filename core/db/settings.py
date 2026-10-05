@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from core.db.models import AssetConfig, UserSettings
@@ -22,6 +23,7 @@ _UPDATABLE = frozenset(
     {
         "auto_rebalance_enabled",
         "cash_rebalance_enabled",
+        "failure_streak",
         "invest_cadence_anchor",
         "invest_cadence_mode",
         "invest_cash_enabled",
@@ -166,3 +168,25 @@ def lock_settings(session: Session, user_id: uuid.UUID) -> UserSettings | None:
     passing the same check at the same time.
     """
     return session.get(UserSettings, user_id, with_for_update=True, populate_existing=True)
+
+
+def unscheduled_settings(session: Session) -> list[UserSettings]:
+    """Settings missing a next run they should have: written before the scheduler existed.
+
+    Across every user, like the retention sweeps. It runs once, at start-up.
+    """
+    stmt = select(UserSettings).where(
+        or_(
+            UserSettings.next_rebalance_at.is_(None),
+            and_(UserSettings.invest_cash_enabled.is_(True), UserSettings.next_invest_at.is_(None)),
+        )
+    )
+    return list(session.execute(stmt).scalars())
+
+
+def pairs_for(session: Session, user_ids: Collection[uuid.UUID]) -> set[str]:
+    """The pairs these users are configured with: what a tick reads prices for, in one call."""
+    if not user_ids:
+        return set()
+    stmt = select(AssetConfig.pair).where(AssetConfig.user_id.in_(user_ids)).distinct()
+    return set(session.execute(stmt).scalars())

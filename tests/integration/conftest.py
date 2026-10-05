@@ -294,6 +294,30 @@ def user_locks() -> FakeLocks:
     return FakeLocks()
 
 
+class FakeSchedulerLock:
+    """The tick lock, without a second connection. `held` stands for another process
+    running the tick."""
+
+    def __init__(self):
+        self.held = False
+
+    @contextmanager
+    def __call__(self):
+        if self.held:
+            yield False
+            return
+        self.held = True
+        try:
+            yield True
+        finally:
+            self.held = False
+
+
+@pytest.fixture
+def scheduler_lock() -> FakeSchedulerLock:
+    return FakeSchedulerLock()
+
+
 @pytest.fixture
 def fake_google() -> FakeGoogle:
     return FakeGoogle()
@@ -301,7 +325,11 @@ def fake_google() -> FakeGoogle:
 
 @pytest.fixture
 def app_context(
-    db_session: Session, fake_kraken: FakeKraken, fake_google: FakeGoogle, user_locks: FakeLocks
+    db_session: Session,
+    fake_kraken: FakeKraken,
+    fake_google: FakeGoogle,
+    user_locks: FakeLocks,
+    scheduler_lock: FakeSchedulerLock,
 ) -> AppContext:
     """The application's dependencies, with every provider fake and the database real."""
     config = AppConfig(
@@ -345,6 +373,7 @@ def app_context(
         signer=TokenSigner(config.jwt_secret, config.jwt_ttl, now=lambda: FIXED_NOW),
         catalog=MarketCatalog(KrakenClient(kraken_http, limiter), lambda: FIXED_NOW),
         user_lock=user_locks,
+        scheduler_lock=scheduler_lock,
         now=lambda: FIXED_NOW,
     )
 

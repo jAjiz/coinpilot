@@ -1,4 +1,6 @@
 import base64
+from contextlib import contextmanager
+from dataclasses import replace
 from decimal import Decimal
 
 import pytest
@@ -7,10 +9,10 @@ from core.db.orders import list_orders, record_attempt
 from core.db.proposals import get_proposal
 from core.db.settings import create_settings, update_settings, upsert_asset
 from core.db.telemetry import list_evaluations
-from core.db.types import OrderReason, ProposalStatus
+from core.db.types import OrderReason, ProposalStatus, Trigger
 from core.db.users import save_credentials
 from core.execution import EvaluationStatus
-from core.rebalance import NoProposal, StaleVersion, approve, current, propose, withdraw
+from core.rebalance import NoProposal, StaleVersion, approve, current, propose, rebalance_now, withdraw
 from engine.types import Side
 from exchange.types import Credentials
 
@@ -247,3 +249,109 @@ def test_an_approval_waits_for_an_unresolved_order(app_context, db_session, fake
     assert result.proposal.version == 1
     assert result.proposal.status == "LIVE"
     assert _sent(fake_kraken) == []
+
+
+def test_a_scheduled_proposal_is_marked_scheduled(app_context, db_session, user):
+    result = propose(app_context, user.id, trigger=Trigger.SCHEDULER)
+
+    assert result.proposal.trigger == "SCHEDULED"
+    record = list_evaluations(db_session, user.id)[0]
+    assert (record.operation, record.trigger) == ("PROPOSE", "SCHEDULER")
+
+
+def test_an_approval_is_recorded_as_one(app_context, db_session, user):
+    propose(app_context, user.id)
+
+    approve(app_context, user.id, 1)
+
+    assert {(e.operation, e.trigger) for e in list_evaluations(db_session, user.id)} == {
+        ("PROPOSE", "API"),
+        ("APPROVE", "API"),
+    }
+
+
+def test_an_automatic_rebalance_executes_without_an_approval(app_context, db_session, fake_kraken, user):
+    update_settings(db_session, user.id, auto_rebalance_enabled=True)
+
+    result = rebalance_now(app_context, user.id)
+
+    assert result.status is EvaluationStatus.DONE
+    assert [form["type"] for form in _sent(fake_kraken)] == ["sell", "buy"]
+    assert {order.reason for order in list_orders(db_session, user.id)} == {OrderReason.REBALANCE}
+    assert get_proposal(db_session, user.id) is None
+    record = list_evaluations(db_session, user.id)[0]
+    assert (record.operation, record.trigger) == ("REBALANCE", "SCHEDULER")
+
+
+def test_an_automatic_rebalance_withdraws_the_live_proposal_first(app_context, db_session, fake_kraken, user):
+    """What executes is today's plan. A proposal left live would offer an approval of
+    something already done."""
+    update_settings(db_session, user.id, auto_rebalance_enabled=True)
+    propose(app_context, user.id)
+
+    result = rebalance_now(app_context, user.id)
+
+    assert result.status is EvaluationStatus.DONE
+    assert get_proposal(db_session, user.id).status == ProposalStatus.WITHDRAWN
+    assert any("proposal version 1 was withdrawn" in message for message in result.messages)
+
+
+def test_an_automatic_rebalance_sends_nothing_with_automatic_rebalancing_off(
+    app_context, db_session, fake_kraken, user
+):
+    update_settings(db_session, user.id, auto_rebalance_enabled=False)
+
+    result = rebalance_now(app_context, user.id)
+
+    assert result.status is EvaluationStatus.NOTHING_TO_DO
+    assert any("switched off" in message for message in result.messages)
+    assert fake_kraken.placed == []
+    assert list_orders(db_session, user.id) == []
+    record = list_evaluations(db_session, user.id)[0]
+    assert (record.operation, record.trigger, record.status) == ("REBALANCE", "SCHEDULER", "NOTHING_TO_DO")
+
+
+def test_switching_it_off_after_the_evaluation_started_stops_the_rebalance(
+    app_context, db_session, fake_kraken, user, user_locks
+):
+    """The setting is read again under the lock, just before anything is sent: a user who
+    switched it off after the scheduler chose them is not sold from. The switch lands the
+    moment the lock is taken, which is after `rebalance_now` was called."""
+    update_settings(db_session, user.id, auto_rebalance_enabled=True)
+
+    @contextmanager
+    def switched_off_on_entry(user_id):
+        with user_locks(user_id) as taken:
+            update_settings(db_session, user_id, auto_rebalance_enabled=False)
+            yield taken
+
+    context = replace(app_context, user_lock=switched_off_on_entry)
+
+    result = rebalance_now(context, user.id)
+
+    assert result.status is EvaluationStatus.NOTHING_TO_DO
+    assert any("switched off" in message for message in result.messages)
+    assert fake_kraken.placed == []
+    assert list_orders(db_session, user.id) == []
+
+
+def test_pausing_after_the_evaluation_started_stops_the_rebalance(
+    app_context, db_session, fake_kraken, user, user_locks
+):
+    """A user paused after the scheduler chose them is not sold from either."""
+    update_settings(db_session, user.id, auto_rebalance_enabled=True)
+
+    @contextmanager
+    def paused_on_entry(user_id):
+        with user_locks(user_id) as taken:
+            update_settings(db_session, user_id, paused=True)
+            yield taken
+
+    context = replace(app_context, user_lock=paused_on_entry)
+
+    result = rebalance_now(context, user.id)
+
+    assert result.status is EvaluationStatus.NOTHING_TO_DO
+    assert any("paused" in message for message in result.messages)
+    assert fake_kraken.placed == []
+    assert list_orders(db_session, user.id) == []

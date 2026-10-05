@@ -9,7 +9,7 @@ import pytest
 from core.db.orders import list_orders
 from core.db.settings import create_settings, update_settings, upsert_asset
 from core.db.telemetry import latest_snapshot, list_evaluations
-from core.db.types import OrderReason
+from core.db.types import Operation, OrderReason, Trigger
 from core.db.users import save_credentials
 from core.execution import EvaluationStatus, LegStatus, evaluate, invest
 from engine.types import Side
@@ -45,7 +45,15 @@ def _send(planned, log):
 
 
 def _rebalance(app_context, user, decide=_send):
-    return evaluate(app_context, user.id, allow_sells=True, reason=OrderReason.REBALANCE, decide=decide)
+    return evaluate(
+        app_context,
+        user.id,
+        allow_sells=True,
+        reason=OrderReason.REBALANCE,
+        decide=decide,
+        operation=Operation.REBALANCE,
+        trigger=Trigger.API,
+    )
 
 
 def _sent(fake_kraken):
