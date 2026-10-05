@@ -5,11 +5,12 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 import core.database as db
-from api.deps import CurrentUser, Db
+from api.deps import Ctx, CurrentUser, Db
 from api.schemas import ConfigOut, ConfigPatch
 from core.db.models import UserSettings
 from core.db.types import CadenceMode
 from core.markets import SUPPORTED_FIATS
+from core.schedule import EVERY_SOURCE, rescheduled
 
 router = APIRouter(prefix="/config", tags=["config"])
 
@@ -47,13 +48,14 @@ def read_config(user: CurrentUser, session: Db) -> UserSettings:
 
 
 @router.patch("", response_model=ConfigOut)
-def patch_config(body: ConfigPatch, user: CurrentUser, session: Db) -> UserSettings:
+def patch_config(body: ConfigPatch, user: CurrentUser, session: Db, context: Ctx) -> UserSettings:
     changes = body.model_dump(exclude_unset=True)
     fiat = changes.pop("fiat", None)
     fiat = fiat.strip().upper() if isinstance(fiat, str) else None
 
     settings = db.lock_settings(session, user.id)
-    if settings is None:
+    created = settings is None
+    if created:
         if fiat is None:
             raise HTTPException(409, "the first PATCH /config must choose a fiat")
         if fiat not in SUPPORTED_FIATS:
@@ -70,4 +72,10 @@ def patch_config(body: ConfigPatch, user: CurrentUser, session: Db) -> UserSetti
 
     if changes:
         settings = db.update_settings(session, user.id, **changes)
+    # The scheduler's next runs follow the settings they come from (spec §10.2).
+    moves = rescheduled(
+        settings, EVERY_SOURCE if created else changes, context.now(), context.config.scheduler
+    )
+    if moves:
+        settings = db.update_settings(session, user.id, **moves)
     return settings

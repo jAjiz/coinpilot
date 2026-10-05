@@ -43,6 +43,7 @@ from core.db.settings import (
     list_assets,
     lock_settings,
     targets_for,
+    unscheduled_settings,
     update_settings,
     upsert_asset,
 )
@@ -112,6 +113,7 @@ __all__ = [
     "snapshots_since",
     "start_evaluation",
     "targets_for",
+    "unscheduled_settings",
     "update_settings",
     "upsert_asset",
     "withdraw",

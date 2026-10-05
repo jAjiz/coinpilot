@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from core.db.models import AssetConfig, UserSettings
@@ -167,3 +167,17 @@ def lock_settings(session: Session, user_id: uuid.UUID) -> UserSettings | None:
     passing the same check at the same time.
     """
     return session.get(UserSettings, user_id, with_for_update=True, populate_existing=True)
+
+
+def unscheduled_settings(session: Session) -> list[UserSettings]:
+    """Settings missing a next run they should have: written before the scheduler existed.
+
+    Across every user, like the retention sweeps. It runs once, at start-up.
+    """
+    stmt = select(UserSettings).where(
+        or_(
+            UserSettings.next_rebalance_at.is_(None),
+            and_(UserSettings.invest_cash_enabled.is_(True), UserSettings.next_invest_at.is_(None)),
+        )
+    )
+    return list(session.execute(stmt).scalars())

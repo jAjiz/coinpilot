@@ -1,6 +1,8 @@
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from core.db.settings import get_settings
+from core.cadence import offset_seconds
+from core.db.settings import get_settings, update_settings
 
 
 def test_there_are_no_settings_until_the_first_patch(api, make_user, login):
@@ -114,3 +116,61 @@ def test_the_times_the_scheduler_owns_cannot_be_patched(api, make_user, login):
     response = api.patch("/config", json={"next_invest_at": "2026-10-01T09:00:00+00:00"}, headers=headers)
 
     assert response.status_code == 422
+
+
+def test_new_settings_look_for_drift_on_the_minimum_cadence_and_do_not_invest(
+    api, app_context, db_session, make_user, login
+):
+    user = make_user()
+
+    api.patch("/config", json={"fiat": "EUR"}, headers=login(user))
+
+    settings = get_settings(db_session, user.id)
+    assert settings.next_invest_at is None
+    assert app_context.now() < settings.next_rebalance_at <= app_context.now() + timedelta(minutes=15)
+
+
+def test_turning_investment_on_schedules_it_and_off_clears_it(api, app_context, db_session, make_user, login):
+    user = make_user()
+    headers = login(user)
+    api.patch("/config", json={"fiat": "EUR"}, headers=headers)
+
+    api.patch("/config", json={"invest_cash_enabled": True}, headers=headers)
+    assert app_context.now() < get_settings(db_session, user.id).next_invest_at
+
+    api.patch("/config", json={"invest_cash_enabled": False}, headers=headers)
+    assert get_settings(db_session, user.id).next_invest_at is None
+
+
+def test_a_new_cadence_moves_its_next_run(api, db_session, make_user, login):
+    """The clock is 2026-09-29 12:00: monthly from 1 January at 09:00 is next on 1 October."""
+    user = make_user()
+    headers = login(user)
+    api.patch("/config", json={"fiat": "EUR"}, headers=headers)
+
+    api.patch(
+        "/config",
+        json={
+            "rebalance_cadence_mode": "INTERVAL",
+            "rebalance_interval_months": 1,
+            "rebalance_cadence_anchor": "2026-01-01T09:00:00Z",
+        },
+        headers=headers,
+    )
+
+    shift = timedelta(seconds=offset_seconds(user.id, 3600))
+    assert (
+        get_settings(db_session, user.id).next_rebalance_at == datetime(2026, 10, 1, 9, 0, tzinfo=UTC) + shift
+    )
+
+
+def test_a_change_to_anything_else_leaves_the_schedule_alone(api, db_session, make_user, login):
+    user = make_user()
+    headers = login(user)
+    api.patch("/config", json={"fiat": "EUR"}, headers=headers)
+    planned = datetime(2026, 10, 3, 9, 0, tzinfo=UTC)
+    update_settings(db_session, user.id, next_rebalance_at=planned)
+
+    api.patch("/config", json={"min_drift_pct": "5"}, headers=headers)
+
+    assert get_settings(db_session, user.id).next_rebalance_at == planned
