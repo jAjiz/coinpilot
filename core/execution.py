@@ -27,7 +27,7 @@ import core.database as db
 from core.catalog import MarketCatalog
 from core.crypto import CredentialCipher, Sealed
 from core.db.models import Order
-from core.db.types import OrderReason
+from core.db.types import Operation, OrderReason, Trigger
 from core.portfolio import PortfolioView, plain_amount
 from core.reading import PortfolioUnavailable, read_portfolio
 from core.settlement import resolve_pending, settle
@@ -41,7 +41,7 @@ logger = logging.getLogger("coinpilot.execution")
 
 
 class ExecutionContext(Protocol):
-    """What the executor needs. `api.context.AppContext` is one; a scheduler will be another."""
+    """What the executor needs. `api.context.AppContext` is one; the scheduler's tick is another."""
 
     sessions: Callable[[], AbstractContextManager[Session]]
     cipher: CredentialCipher
@@ -168,7 +168,34 @@ class _Account:
 UNRESOLVED_MESSAGE = "an earlier order is still unresolved; nothing was computed"
 
 
-def invest(context: ExecutionContext, user_id: uuid.UUID, *, preview: bool = False) -> EvaluationResult:
+class _Pin:
+    """Pins the evaluation's snapshot once, just before its first order is sent.
+
+    Before, not after: a process that dies mid-operation still leaves the account as it was
+    before the orders, and the day's next read cannot overwrite it.
+    """
+
+    def __init__(self, context: ExecutionContext, user_id: uuid.UUID, snapshot_id: uuid.UUID) -> None:
+        self._context = context
+        self._user_id = user_id
+        self._snapshot_id = snapshot_id
+        self._done = False
+
+    def __call__(self) -> None:
+        if self._done:
+            return
+        with self._context.sessions() as session:
+            db.pin_snapshot(session, self._user_id, self._snapshot_id)
+        self._done = True
+
+
+def invest(
+    context: ExecutionContext,
+    user_id: uuid.UUID,
+    *,
+    preview: bool = False,
+    trigger: Trigger = Trigger.API,
+) -> EvaluationResult:
     """Invest the user's free cash now or, with `preview`, say what that would do.
 
     Raises `NotReady` before anything is read, `EvaluationBusy` when another evaluation
@@ -179,7 +206,15 @@ def invest(context: ExecutionContext, user_id: uuid.UUID, *, preview: bool = Fal
         account = _load(context, user_id, allow_sells=False)
         private = context.kraken_for(context.cipher.unseal(user_id, account.sealed))
         return _preview(context, user_id, account, private)
-    return evaluate(context, user_id, allow_sells=False, reason=OrderReason.INVEST, decide=_send_it)
+    return evaluate(
+        context,
+        user_id,
+        allow_sells=False,
+        reason=OrderReason.INVEST,
+        decide=_send_it,
+        operation=Operation.INVEST,
+        trigger=trigger,
+    )
 
 
 def _send_it(planned: Planned, log: list[str]) -> None:
@@ -194,17 +229,20 @@ def evaluate(
     allow_sells: bool,
     reason: OrderReason,
     decide: Decision,
+    operation: Operation,
+    trigger: Trigger,
 ) -> EvaluationResult:
     """Lock, resolve, read and plan; then let `decide` judge, and send what it lets through.
 
-    Raises as `invest` does. Every other outcome is a status in the result, and recorded.
+    Raises as `invest` does. Every other outcome is a status in the result, and recorded
+    with `operation` and `trigger`.
     """
     account = _load(context, user_id, allow_sells=allow_sells)
     private = context.kraken_for(context.cipher.unseal(user_id, account.sealed))
     with context.user_lock(user_id) as taken:
         if not taken:
             raise EvaluationBusy(str(user_id))
-        return _run(context, user_id, account, private, reason, decide)
+        return _run(context, user_id, account, private, reason, decide, operation, trigger)
 
 
 def _load(context: ExecutionContext, user_id: uuid.UUID, *, allow_sells: bool) -> _Account:
@@ -306,9 +344,13 @@ def _run(
     private,
     reason: OrderReason,
     decide: Decision,
+    operation: Operation,
+    trigger: Trigger,
 ) -> EvaluationResult:
     with context.sessions() as session:
-        evaluation_id = db.start_evaluation(session, user_id, context.now()).id
+        evaluation_id = db.start_evaluation(
+            session, user_id, context.now(), operation=operation, trigger=trigger
+        ).id
     log: list[str] = []
     legs: list[LegResult] = []
     status = EvaluationStatus.ERROR
@@ -341,7 +383,7 @@ def _evaluate(
 
     planned = _plan(context, account, private)
     with context.sessions() as session:
-        db.record_snapshot(
+        snapshot_id = db.keep_snapshot(
             session,
             user_id,
             as_of=context.now(),
@@ -349,13 +391,14 @@ def _evaluate(
             total_value=planned.view.managed_value,
             cash=planned.view.cash,
             holdings=planned.view.snapshot_json(),
-        )
+        ).id
 
     verdict = decide(planned, log)
     if verdict is not None:
         return verdict
 
-    stopped = _send_all(context, user_id, private, planned, reason, account.fiat, log, legs)
+    pin = _Pin(context, user_id, snapshot_id)
+    stopped = _send_all(context, user_id, private, planned, reason, account.fiat, log, legs, pin)
     if stopped:
         return EvaluationStatus.STOPPED
     if any(leg.status is LegStatus.FAILED for leg in legs):
@@ -374,6 +417,7 @@ def _send_all(
     fiat: str,
     log: list[str],
     legs: list[LegResult],
+    pin: Callable[[], None],
 ) -> bool:
     """Sells first, then the buys inside what there is to spend (spec §7.2).
 
@@ -385,7 +429,7 @@ def _send_all(
     for leg in planned.legs:
         if leg.side is not Side.SELL:
             continue
-        result, stopped = _attempt(context, user_id, private, leg, reason, stopped)
+        result, stopped = _attempt(context, user_id, private, leg, reason, stopped, pin)
         legs.append(result)
         log.append(_describe(result, fiat))
         if result.status is LegStatus.FILLED:
@@ -395,7 +439,7 @@ def _send_all(
 
     buys = [leg for leg in planned.legs if leg.side is Side.BUY]
     for leg in _within(buys, budget, fiat):
-        result, stopped = _attempt(context, user_id, private, leg, reason, stopped)
+        result, stopped = _attempt(context, user_id, private, leg, reason, stopped, pin)
         legs.append(result)
         log.append(_describe(result, fiat))
     return stopped
@@ -435,12 +479,14 @@ def _attempt(
     leg: PlannedLeg,
     reason: OrderReason,
     stopped: bool,
+    pin: Callable[[], None],
 ) -> tuple[LegResult, bool]:
     """Send one leg unless it is skipped or an earlier answer was lost. Returns `stopped`."""
     if leg.note is not None:
         return _skipped(leg, leg.note), stopped
     if stopped:
         return _skipped(leg, "not sent: an earlier order's answer is unknown"), True
+    pin()
     result = _send(context, user_id, private, leg, reason)
     # An unknown answer leaves no txid. The balance is ambiguous until resolved.
     return result, result.status is LegStatus.PENDING and result.txid is None

@@ -65,7 +65,7 @@ def refresh(user: CurrentUser, session: Db, context: Ctx) -> PortfolioOut:
     except PortfolioUnavailable as exc:
         raise HTTPException(503, f"kraken did not return {exc}; nothing was recorded") from None
 
-    snapshot = db.record_snapshot(
+    snapshot = db.keep_snapshot(
         session,
         user.id,
         as_of=context.now(),

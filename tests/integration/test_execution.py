@@ -8,8 +8,8 @@ import pytest
 
 from core.db.orders import get_by_cl_ord_id, list_orders
 from core.db.settings import create_settings, update_settings, upsert_asset
-from core.db.telemetry import latest_snapshot, list_evaluations
-from core.db.types import OrderStatus
+from core.db.telemetry import latest_snapshot, list_evaluations, snapshots_since
+from core.db.types import OrderStatus, Trigger
 from core.db.users import save_credentials
 from core.execution import (
     EvaluationBusy,
@@ -320,3 +320,48 @@ def test_a_preview_with_something_unresolved_says_so_and_resolves_nothing(
     assert fake_kraken.placed == []
     (order,) = list_orders(db_session, user.id)
     assert order.status == OrderStatus.PENDING
+
+
+def test_the_snapshot_before_sent_orders_is_pinned(app_context, db_session, ready):
+    user = ready()
+
+    invest(app_context, user.id)
+
+    assert latest_snapshot(db_session, user.id).pinned is True
+
+
+def test_the_snapshot_is_pinned_before_the_first_order_leaves(app_context, db_session, fake_kraken, ready):
+    """If the process dies mid-operation, the account before it is still on record."""
+    user = ready()
+    seen = []
+    fake_kraken.on_add_order = lambda form: seen.append(latest_snapshot(db_session, user.id).pinned)
+
+    invest(app_context, user.id)
+
+    assert seen
+    assert all(seen)
+
+
+def test_reads_with_nothing_to_send_keep_one_point_for_the_day(app_context, db_session, fake_kraken, ready):
+    user = ready()
+    # 600 EUR of XBT and 400 EUR of ETH against 60/40, and no cash: nothing to invest.
+    fake_kraken.balance = {"ZEUR": "0", "XXBT": "0.012", "XETH": "0.16"}
+
+    first = invest(app_context, user.id)
+    second = invest(app_context, user.id)
+
+    assert (first.status, second.status) == (EvaluationStatus.NOTHING_TO_DO, EvaluationStatus.NOTHING_TO_DO)
+    series = snapshots_since(db_session, user.id, app_context.now() - timedelta(days=1))
+    assert [snapshot.pinned for snapshot in series] == [False]
+
+
+def test_an_evaluation_records_its_operation_and_trigger(app_context, db_session, ready):
+    user = ready()
+
+    invest(app_context, user.id)
+    invest(app_context, user.id, trigger=Trigger.SCHEDULER)
+
+    assert sorted((e.operation, e.trigger) for e in list_evaluations(db_session, user.id)) == [
+        ("INVEST", "API"),
+        ("INVEST", "SCHEDULER"),
+    ]

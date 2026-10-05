@@ -1,9 +1,9 @@
 import base64
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from core.db.orders import record_attempt
-from core.db.telemetry import latest_snapshot, start_evaluation
+from core.db.telemetry import latest_snapshot, snapshots_since, start_evaluation
 from core.db.types import OrderReason
 from core.db.users import get_credentials
 from engine.types import Side
@@ -154,3 +154,17 @@ def test_a_refresh_reads_names_and_pairs_from_the_catalog(api, make_user, login,
     assert "Assets" not in fake_kraken.calls
     assert "AssetPairs" not in fake_kraken.calls
     assert fake_kraken.calls.count("Balance") == 2
+
+
+def test_refreshes_of_the_same_day_keep_one_point(
+    api, app_context, db_session, make_user, login, fake_kraken
+):
+    user = make_user()
+    headers = login(user)
+    _ready(api, headers)
+    fake_kraken.balance = {"ZEUR": "100"}
+
+    api.post("/portfolio/refresh", headers=headers)
+    api.post("/portfolio/refresh", headers=headers)
+
+    assert len(snapshots_since(db_session, user.id, app_context.now() - timedelta(days=1))) == 1
