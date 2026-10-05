@@ -138,3 +138,19 @@ def test_a_history_page_is_bounded(api, make_user, login):
 
     assert api.get("/orders", params={"limit": 201}, headers=headers).status_code == 422
     assert api.get("/sessions", params={"limit": 0}, headers=headers).status_code == 422
+
+
+def test_a_refresh_reads_names_and_pairs_from_the_catalog(api, make_user, login, fake_kraken):
+    """Every public call shares one bucket at a call a second. Names and pairs change when
+    Kraken lists an asset, not on every refresh."""
+    headers = login(make_user())
+    _ready(api, headers)
+    fake_kraken.balance = {"ZEUR": "100", "XETH": "1"}
+    fake_kraken.calls.clear()
+
+    api.post("/portfolio/refresh", headers=headers)
+    api.post("/portfolio/refresh", headers=headers)
+
+    assert "Assets" not in fake_kraken.calls
+    assert "AssetPairs" not in fake_kraken.calls
+    assert fake_kraken.calls.count("Balance") == 2
