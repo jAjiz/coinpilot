@@ -2991,3 +2991,7 @@ repository.
 
 | Where | What changed | Why |
 |---|---|---|
+| Task 7, `rebalance_now` | Re-reads `auto_rebalance_enabled` under the user lock before any order and sends nothing (`NOTHING_TO_DO`) if it is off. | The switch may have been turned off since the evaluation was scheduled. |
+| Task 7, failure streak | A failed PENDING lookup counts toward the failure streak, via `EvaluationResult.lookup_failed`. | Spec §9.2 is binding; an order merely not listed yet still does not count. |
+| Task 3, `record_snapshot` | It did not gain a `pinned` parameter; pinning goes only through `pin_snapshot`. | One way to pin keeps the one-point-a-day rule in one place. |
+| Task 9, README | The stack line drops APScheduler. | APScheduler is not used. |
