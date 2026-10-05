@@ -333,3 +333,25 @@ def test_switching_it_off_after_the_evaluation_started_stops_the_rebalance(
     assert any("switched off" in message for message in result.messages)
     assert fake_kraken.placed == []
     assert list_orders(db_session, user.id) == []
+
+
+def test_pausing_after_the_evaluation_started_stops_the_rebalance(
+    app_context, db_session, fake_kraken, user, user_locks
+):
+    """A user paused after the scheduler chose them is not sold from either."""
+    update_settings(db_session, user.id, auto_rebalance_enabled=True)
+
+    @contextmanager
+    def paused_on_entry(user_id):
+        with user_locks(user_id) as taken:
+            update_settings(db_session, user_id, paused=True)
+            yield taken
+
+    context = replace(app_context, user_lock=paused_on_entry)
+
+    result = rebalance_now(context, user.id)
+
+    assert result.status is EvaluationStatus.NOTHING_TO_DO
+    assert any("paused" in message for message in result.messages)
+    assert fake_kraken.placed == []
+    assert list_orders(db_session, user.id) == []

@@ -157,10 +157,10 @@ def rebalance_now(context: ExecutionContext, user_id: uuid.UUID) -> EvaluationRe
     """Execute a rebalance without an approval. Only the scheduler calls this, and only for
     a user with automatic rebalancing on: enabling it was the authorisation (spec §3.4).
 
-    The setting is read again under the lock, just before anything is sent: a user who
-    switched it off since the scheduler chose them is not sold from. A live proposal is
-    withdrawn first. It was computed earlier, and what executes is today's plan; left
-    live, it would offer an approval of something already done.
+    The settings are read again under the lock, just before anything is sent: a user who
+    switched it off, or paused, since the scheduler chose them is not sold from. A live
+    proposal is withdrawn first. It was computed earlier, and what executes is today's
+    plan; left live, it would offer an approval of something already done.
     """
 
     def decide(planned: Planned, log: list[str]) -> EvaluationStatus | None:
@@ -168,6 +168,9 @@ def rebalance_now(context: ExecutionContext, user_id: uuid.UUID) -> EvaluationRe
             settings = db.get_settings(session, user_id)
             if settings is None or not settings.auto_rebalance_enabled:
                 log.append("automatic rebalancing was switched off; nothing was sent")
+                return EvaluationStatus.NOTHING_TO_DO
+            if settings.paused:
+                log.append("scheduled operations are paused; nothing was sent")
                 return EvaluationStatus.NOTHING_TO_DO
             slot = db.get_live_proposal(session, user_id)
             if slot is not None:

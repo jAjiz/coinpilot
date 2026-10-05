@@ -204,6 +204,11 @@ def invest(
     Raises `NotReady` before anything is read, `EvaluationBusy` when another evaluation
     of the user holds the lock, and `CredentialsUnreadable` when the stored key does not
     open. Every other outcome is a status in the result.
+
+    By hand, the call is the user asking, and `invest_cash_enabled` does not apply (spec
+    §3.4). From the scheduler, the settings are read again under the lock, just before
+    anything is sent: an investment switched off, or a user paused, since the scheduler
+    chose them is not spent from.
     """
     if preview:
         account = _load(context, user_id, allow_sells=False)
@@ -214,7 +219,7 @@ def invest(
         user_id,
         allow_sells=False,
         reason=OrderReason.INVEST,
-        decide=_send_it,
+        decide=_still_scheduled(context, user_id) if trigger is Trigger.SCHEDULER else _send_it,
         operation=Operation.INVEST,
         trigger=trigger,
     )
@@ -223,6 +228,21 @@ def invest(
 def _send_it(planned: Planned, log: list[str]) -> None:
     """An investment needs no approval (spec §3.4)."""
     return None
+
+
+def _still_scheduled(context: ExecutionContext, user_id: uuid.UUID) -> Decision:
+    def decide(planned: Planned, log: list[str]) -> EvaluationStatus | None:
+        with context.sessions() as session:
+            settings = db.get_settings(session, user_id)
+        if settings is None or not settings.invest_cash_enabled:
+            log.append("investing was switched off; nothing was sent")
+            return EvaluationStatus.NOTHING_TO_DO
+        if settings.paused:
+            log.append("scheduled operations are paused; nothing was sent")
+            return EvaluationStatus.NOTHING_TO_DO
+        return None
+
+    return decide
 
 
 def evaluate(

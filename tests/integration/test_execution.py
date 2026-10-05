@@ -380,3 +380,41 @@ def test_an_unresolved_order_says_whether_kraken_answered_the_lookup(app_context
 
     assert (not_listed.status, not_listed.lookup_failed) == (EvaluationStatus.UNRESOLVED, False)
     assert (unanswered.status, unanswered.lookup_failed) == (EvaluationStatus.UNRESOLVED, True)
+
+
+@pytest.mark.parametrize(
+    ("change", "said"),
+    [({"invest_cash_enabled": False}, "switched off"), ({"paused": True}, "paused")],
+)
+def test_a_scheduled_investment_reads_the_settings_again_under_the_lock(
+    app_context, db_session, fake_kraken, ready, user_locks, change, said
+):
+    """An investment switched off, or a user paused, after the scheduler chose them is not
+    spent from. The change lands the moment the lock is taken, after `invest` was called."""
+    user = ready()
+    update_settings(db_session, user.id, invest_cash_enabled=True)
+
+    @contextmanager
+    def changed_on_entry(user_id):
+        with user_locks(user_id) as taken:
+            update_settings(db_session, user_id, **change)
+            yield taken
+
+    context = replace(app_context, user_lock=changed_on_entry)
+
+    result = invest(context, user.id, trigger=Trigger.SCHEDULER)
+
+    assert result.status is EvaluationStatus.NOTHING_TO_DO
+    assert any(said in message for message in result.messages)
+    assert "AddOrder" not in fake_kraken.calls
+    assert list_orders(db_session, user.id) == []
+
+
+def test_an_investment_by_hand_needs_no_setting(app_context, fake_kraken, ready):
+    """`POST /invest` is the user asking: `invest_cash_enabled` governs the cadence only (spec §3.4)."""
+    user = ready()
+
+    result = invest(app_context, user.id)
+
+    assert result.status is EvaluationStatus.DONE
+    assert _sent(fake_kraken) != []
