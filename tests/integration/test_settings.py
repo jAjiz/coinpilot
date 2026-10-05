@@ -12,6 +12,7 @@ from core.db.settings import (
     get_settings,
     list_assets,
     lock_settings,
+    pairs_for,
     targets_for,
     update_settings,
     upsert_asset,
@@ -203,3 +204,16 @@ def test_the_failure_streak_starts_at_zero_and_can_be_set(db_session: Session, m
     assert get_settings(db_session, user.id).failure_streak == 0
     update_settings(db_session, user.id, failure_streak=2)
     assert get_settings(db_session, user.id).failure_streak == 2
+
+
+def test_the_pairs_of_a_batch_are_read_together(db_session: Session, make_user):
+    alice, bob, carol = make_user(), make_user(), make_user()
+    for person in (alice, bob, carol):
+        create_settings(db_session, person.id, fiat="EUR")
+    upsert_asset(db_session, alice.id, asset="XBT", pair="XXBTZEUR", target_pct=D("50"))
+    upsert_asset(db_session, bob.id, asset="XBT", pair="XXBTZEUR", target_pct=D("50"))
+    upsert_asset(db_session, bob.id, asset="ETH", pair="XETHZEUR", target_pct=D("50"))
+    upsert_asset(db_session, carol.id, asset="SOL", pair="SOLEUR", target_pct=D("50"))
+
+    assert pairs_for(db_session, [alice.id, bob.id]) == {"XXBTZEUR", "XETHZEUR"}
+    assert pairs_for(db_session, []) == set()

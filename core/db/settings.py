@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -181,3 +182,11 @@ def unscheduled_settings(session: Session) -> list[UserSettings]:
         )
     )
     return list(session.execute(stmt).scalars())
+
+
+def pairs_for(session: Session, user_ids: Collection[uuid.UUID]) -> set[str]:
+    """The pairs these users are configured with: what a tick reads prices for, in one call."""
+    if not user_ids:
+        return set()
+    stmt = select(AssetConfig.pair).where(AssetConfig.user_id.in_(user_ids)).distinct()
+    return set(session.execute(stmt).scalars())

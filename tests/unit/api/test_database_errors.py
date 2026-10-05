@@ -57,6 +57,7 @@ def _api(error: Exception) -> TestClient:
         signer=signer,
         catalog=MarketCatalog(KrakenClient(http, limiter), lambda: NOW),
         user_lock=lambda user_id: nullcontext(True),
+        scheduler_lock=lambda: nullcontext(False),
         now=lambda: NOW,
     )
     client = TestClient(create_app(context), raise_server_exceptions=False)

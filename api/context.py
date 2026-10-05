@@ -39,6 +39,8 @@ class AppContext:
     catalog: MarketCatalog
     # One evaluation per user at a time (spec §9.6). Yields whether the lock was taken.
     user_lock: Callable[[uuid.UUID], AbstractContextManager[bool]]
+    # One scheduler tick at a time, across processes. Yields whether it was taken.
+    scheduler_lock: Callable[[], AbstractContextManager[bool]]
     now: Callable[[], datetime]
 
     def public_kraken(self) -> Market:

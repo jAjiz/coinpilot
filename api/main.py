@@ -18,7 +18,7 @@ from api.context import AppContext
 from core.catalog import MarketCatalog
 from core.config import load_config
 from core.crypto import CredentialCipher
-from core.db.locks import advisory_user_lock
+from core.db.locks import advisory_scheduler_lock, advisory_user_lock
 from core.db.session import configure, get_engine, session_scope
 from core.tokens import TokenSigner
 from exchange.client import KrakenClient, build_http_client
@@ -47,6 +47,7 @@ def build() -> FastAPI:
         signer=TokenSigner(config.jwt_secret, config.jwt_ttl, now=now),
         catalog=MarketCatalog(KrakenClient(kraken_http, limiter), now),
         user_lock=partial(advisory_user_lock, get_engine()),
+        scheduler_lock=partial(advisory_scheduler_lock, get_engine()),
         now=now,
     )
     return create_app(context)

@@ -2,7 +2,7 @@ import uuid
 
 import pytest
 
-from core.db.locks import advisory_user_lock, lock_key
+from core.db.locks import advisory_scheduler_lock, advisory_user_lock, lock_key
 
 
 def test_a_second_evaluation_of_the_same_user_is_refused(engine):
@@ -43,3 +43,30 @@ def test_the_key_is_stable_and_fits_a_bigint():
 
     assert lock_key(user_id) == lock_key(user_id)
     assert -(2**63) <= lock_key(user_id) < 2**63
+
+
+# A key of the tests' own, so a running API's tick never makes these flaky.
+TEST_KEY = (0x74657374, 7)
+
+
+def test_only_one_process_runs_a_tick(engine):
+    with (
+        advisory_scheduler_lock(engine, TEST_KEY) as first,
+        advisory_scheduler_lock(engine, TEST_KEY) as second,
+    ):
+        assert first is True
+        assert second is False
+
+
+def test_the_tick_lock_is_released(engine):
+    with advisory_scheduler_lock(engine, TEST_KEY):
+        pass
+
+    with advisory_scheduler_lock(engine, TEST_KEY) as again:
+        assert again is True
+
+
+def test_the_tick_lock_and_a_user_lock_do_not_collide(engine):
+    with advisory_scheduler_lock(engine, TEST_KEY) as tick, advisory_user_lock(engine, uuid.uuid4()) as user:
+        assert tick is True
+        assert user is True
