@@ -114,6 +114,9 @@ class EvaluationResult:
     preview: bool
     legs: tuple[LegResult, ...] = ()
     messages: tuple[str, ...] = ()
+    # With `UNRESOLVED`: what blocked it was a lookup Kraken did not answer (spec §9.2),
+    # not an order merely not listed yet.
+    lookup_failed: bool = False
 
 
 @dataclass(frozen=True)
@@ -353,16 +356,19 @@ def _run(
         ).id
     log: list[str] = []
     legs: list[LegResult] = []
+    blocked: list[bool] = []
     status = EvaluationStatus.ERROR
     try:
-        status = _evaluate(context, user_id, account, private, reason, decide, log, legs)
+        status = _evaluate(context, user_id, account, private, reason, decide, log, legs, blocked)
     except PortfolioUnavailable as exc:
         status = EvaluationStatus.KRAKEN_UNAVAILABLE
         log.append(f"kraken did not return {exc}; nothing was sent")
     finally:
         with context.sessions() as session:
             db.finish_evaluation(session, evaluation_id, status, context.now(), "\n".join(log) or None)
-    return EvaluationResult(status=status, preview=False, legs=tuple(legs), messages=tuple(log))
+    return EvaluationResult(
+        status=status, preview=False, legs=tuple(legs), messages=tuple(log), lookup_failed=any(blocked)
+    )
 
 
 def _evaluate(
@@ -374,11 +380,13 @@ def _evaluate(
     decide: Decision,
     log: list[str],
     legs: list[LegResult],
+    blocked: list[bool],
 ) -> EvaluationStatus:
     resolution = resolve_pending(context.sessions, private, user_id, context.now())
     log.extend(resolution.messages)
     if not resolution.clear:
         log.append(UNRESOLVED_MESSAGE)
+        blocked.append(resolution.lookup_failed)
         return EvaluationStatus.UNRESOLVED
 
     planned = _plan(context, account, private)

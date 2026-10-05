@@ -365,3 +365,18 @@ def test_an_evaluation_records_its_operation_and_trigger(app_context, db_session
         ("INVEST", "API"),
         ("INVEST", "SCHEDULER"),
     ]
+
+
+def test_an_unresolved_order_says_whether_kraken_answered_the_lookup(app_context, fake_kraken, ready):
+    """Spec §9.2: a lookup that failed is the system failing; an order not listed yet is a wait."""
+    user = ready()
+    fake_kraken.lose_add_order = "dropped"
+    invest(app_context, user.id)
+    fake_kraken.lose_add_order = None
+
+    not_listed = invest(app_context, user.id)
+    fake_kraken.down.add("OpenOrders")
+    unanswered = invest(app_context, user.id)
+
+    assert (not_listed.status, not_listed.lookup_failed) == (EvaluationStatus.UNRESOLVED, False)
+    assert (unanswered.status, unanswered.lookup_failed) == (EvaluationStatus.UNRESOLVED, True)

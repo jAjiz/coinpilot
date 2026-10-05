@@ -61,6 +61,8 @@ def settle(session: Session, cl_ord_id: str, lookup: OrderLookup | None) -> Orde
 class Resolution:
     clear: bool
     messages: tuple[str, ...]
+    # Kraken did not answer a lookup: the system failing, not an order still on its way.
+    lookup_failed: bool = False
 
 
 def resolve_pending(
@@ -78,12 +80,15 @@ def resolve_pending(
         pending = [(o.cl_ord_id, o.txid, o.attempted_at) for o in db.pending_orders(session, user_id)]
 
     clear = True
+    lookup_failed = False
     messages: list[str] = []
     for cl_ord_id, txid, attempted_at in pending:
         if txid is not None:
             lookup = find_order_by_txid(private, txid)
         else:
             lookup = find_order_by_cl_ord_id(private, cl_ord_id)
+        if lookup is None:
+            lookup_failed = True
         if lookup is not None and lookup.txid is None and now - attempted_at < ABSENCE_GRACE:
             clear = False
             messages.append(f"order {cl_ord_id}: not listed yet; absence is believed after the grace period")
@@ -95,4 +100,4 @@ def resolve_pending(
             messages.append(f"order {cl_ord_id}: still unresolved")
         else:
             messages.append(f"order {cl_ord_id}: resolved as {status.value}")
-    return Resolution(clear=clear, messages=tuple(messages))
+    return Resolution(clear=clear, messages=tuple(messages), lookup_failed=lookup_failed)
