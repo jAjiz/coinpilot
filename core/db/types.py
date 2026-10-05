@@ -62,6 +62,22 @@ class ProposalTrigger(StrEnum):
     SCHEDULED = "SCHEDULED"
 
 
+class Operation(StrEnum):
+    """What an evaluation was for. Recorded in `sessions`, which carries no check constraint."""
+
+    INVEST = "INVEST"
+    PROPOSE = "PROPOSE"
+    APPROVE = "APPROVE"
+    REBALANCE = "REBALANCE"
+
+
+class Trigger(StrEnum):
+    """Who started an evaluation: a request, or the scheduler."""
+
+    API = "API"
+    SCHEDULER = "SCHEDULER"
+
+
 def enum_check(column: str, values: type[StrEnum], name: str) -> CheckConstraint:
     """A check constraint listing exactly the members of `values`.
 

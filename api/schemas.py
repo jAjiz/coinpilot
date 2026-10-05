@@ -190,6 +190,8 @@ class EvaluationOut(BaseModel):
     finished_at: datetime | None
     duration_ms: int | None
     status: str
+    operation: str | None
+    trigger: str | None
     log_messages: str | None
 
 

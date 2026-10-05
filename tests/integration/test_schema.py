@@ -94,3 +94,14 @@ def test_running_the_migrations_leaves_existing_loggers_switched_on(engine: Engi
     command.upgrade(cfg, "head")
 
     assert logger.disabled is False
+
+
+def test_the_scheduler_columns_exist(db_session: Session):
+    inspector = inspect(db_session.get_bind())
+
+    def columns(table):
+        return {column["name"] for column in inspector.get_columns(table)}
+
+    assert "failure_streak" in columns("user_settings")
+    assert "pinned" in columns("portfolio_snapshots")
+    assert {"operation", "trigger"} <= columns("sessions")

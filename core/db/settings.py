@@ -22,6 +22,7 @@ _UPDATABLE = frozenset(
     {
         "auto_rebalance_enabled",
         "cash_rebalance_enabled",
+        "failure_streak",
         "invest_cadence_anchor",
         "invest_cadence_mode",
         "invest_cash_enabled",

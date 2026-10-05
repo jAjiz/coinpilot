@@ -7,7 +7,7 @@ rather than added once somebody asks a question they answer.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from sqlalchemy import delete, select
@@ -45,6 +45,45 @@ def record_snapshot(
     return snapshot
 
 
+def keep_snapshot(
+    session: Session,
+    user_id: uuid.UUID,
+    as_of: datetime,
+    fiat: str,
+    total_value: Decimal,
+    cash: Decimal,
+    holdings: dict[str, object],
+) -> PortfolioSnapshot:
+    """The day's point: overwrite the latest snapshot if it is unpinned and of the same UTC
+    day as `as_of`, and add one otherwise.
+
+    One point a day is the resolution a performance chart needs, and the latest read is
+    still what `GET /portfolio` shows.
+    """
+    latest = latest_snapshot(session, user_id)
+    if latest is not None and not latest.pinned and _day(latest.as_of) == _day(as_of):
+        latest.as_of = as_of
+        latest.fiat = fiat
+        latest.total_value = total_value
+        latest.cash = cash
+        latest.holdings = holdings
+        session.flush()
+        return latest
+    return record_snapshot(session, user_id, as_of, fiat, total_value, cash, holdings)
+
+
+def pin_snapshot(session: Session, user_id: uuid.UUID, snapshot_id: uuid.UUID) -> None:
+    """Keep a snapshot as it is: orders are about to be sent from the account it shows."""
+    snapshot = session.get(PortfolioSnapshot, snapshot_id)
+    if snapshot is not None and snapshot.user_id == user_id:
+        snapshot.pinned = True
+        session.flush()
+
+
+def _day(moment: datetime) -> date:
+    return moment.astimezone(UTC).date()
+
+
 def latest_snapshot(session: Session, user_id: uuid.UUID) -> PortfolioSnapshot | None:
     """What `GET /portfolio` returns immediately, with its own `as_of`."""
     stmt = (
@@ -72,9 +111,18 @@ def snapshots_since(
     return list(session.execute(stmt).scalars())
 
 
-def start_evaluation(session: Session, user_id: uuid.UUID, started_at: datetime) -> EvaluationSession:
+def start_evaluation(
+    session: Session,
+    user_id: uuid.UUID,
+    started_at: datetime,
+    *,
+    operation: str | None = None,
+    trigger: str | None = None,
+) -> EvaluationSession:
     """Open the record before the work, so a process that dies still leaves a trace."""
-    record = EvaluationSession(user_id=user_id, started_at=started_at, status=RUNNING)
+    record = EvaluationSession(
+        user_id=user_id, started_at=started_at, status=RUNNING, operation=operation, trigger=trigger
+    )
     session.add(record)
     session.flush()
     return record

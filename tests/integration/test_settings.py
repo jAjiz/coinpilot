@@ -194,3 +194,12 @@ def test_locking_settings_returns_the_row(db_session, make_user):
 
 def test_locking_settings_that_do_not_exist_is_none(db_session, make_user):
     assert lock_settings(db_session, make_user().id) is None
+
+
+def test_the_failure_streak_starts_at_zero_and_can_be_set(db_session: Session, make_user):
+    user = make_user()
+    create_settings(db_session, user.id, fiat="EUR")
+
+    assert get_settings(db_session, user.id).failure_streak == 0
+    update_settings(db_session, user.id, failure_streak=2)
+    assert get_settings(db_session, user.id).failure_streak == 2
