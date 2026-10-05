@@ -311,6 +311,30 @@ def test_retention_runs_on_the_first_tick_of_each_day(scheduler, db_session, mak
     assert scheduler.tick(now + timedelta(days=1)).swept is True
 
 
+def test_a_failing_retention_still_lets_the_due_users_be_evaluated(
+    scheduler, db_session, fake_kraken, account, now, monkeypatch, caplog
+):
+    """Housekeeping must not stop the job that matters: the sweep is logged, left for the
+    next tick, and the users due are evaluated all the same."""
+    user = account(balance={"ZEUR": "1000"}, invest_cash_enabled=True, next_invest_at=now - MINUTE)
+
+    def broken(session, before):
+        raise RuntimeError("statement timeout")
+
+    monkeypatch.setattr(scheduler_module.db, "delete_evaluations_before", broken)
+
+    with caplog.at_level(logging.ERROR, logger="coinpilot.scheduler"):
+        report = scheduler.tick(now)
+
+    assert report == TickReport(ran=True, users=1, swept=False)
+    assert {form["type"] for form in _sent(fake_kraken)} == {"buy"}
+    assert list_evaluations(db_session, user.id)[0].status == "DONE"
+    assert any("retention" in record.getMessage() for record in _ours(caplog))
+
+    monkeypatch.undo()
+    assert scheduler.tick(now + MINUTE).swept is True
+
+
 def test_a_tick_that_raises_does_not_end_the_loop(app_context, monkeypatch):
     scheduler = Scheduler(_with(app_context, tick=timedelta(0)))
     calls = []

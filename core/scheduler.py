@@ -218,13 +218,22 @@ class Scheduler:
             logger.info("user %s: scheduled operations recovered after %d failures", user_id, before)
 
     def _sweep(self, now: datetime) -> bool:
-        """Retention, on the first tick of each UTC day, and so on the first after start-up."""
+        """Retention, on the first tick of each UTC day, and so on the first after start-up.
+
+        Housekeeping must not stop the job that matters: a sweep that raises is logged, the
+        day stays unswept so the next tick tries again, and the tick goes on to the users due.
+        """
         today = now.astimezone(UTC).date()
         if self._swept_on == today:
             return False
-        with self._context.sessions() as session:
-            evaluations = db.delete_evaluations_before(session, now - self._config.sessions_retention)
-            tokens = db.delete_expired_refresh_tokens(session, now)
+        try:
+            with self._context.sessions() as session:
+                evaluations = db.delete_evaluations_before(session, now - self._config.sessions_retention)
+                tokens = db.delete_expired_refresh_tokens(session, now)
+        except Exception:
+            # Nothing about any user here: the rows are deleted by date alone.
+            logger.exception("retention failed; the next tick tries again")
+            return False
         logger.info("retention removed %d evaluations and %d refresh tokens", evaluations, tokens)
         self._swept_on = today
         return True
