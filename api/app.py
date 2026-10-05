@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -12,6 +15,7 @@ from sqlalchemy.exc import TimeoutError as PoolTimeout
 
 from api.context import AppContext
 from api.routes import assets, auth, config, credentials, health, history, invest, portfolio, proposal
+from core.scheduler import Scheduler
 
 logger = logging.getLogger("coinpilot.api")
 
@@ -50,8 +54,24 @@ async def _database_error(request: Request, exc: Exception) -> JSONResponse:
     return JSONResponse(status_code=503, content={"detail": DATABASE_DOWN})
 
 
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """The scheduler lives as long as the application: one process, both jobs (spec §4.1)."""
+    context: AppContext = app.state.context
+    scheduler = Scheduler(context) if context.config.scheduler.enabled else None
+    app.state.scheduler = scheduler
+    if scheduler is not None:
+        scheduler.start()
+    try:
+        yield
+    finally:
+        if scheduler is not None:
+            # Off the event loop: stopping waits for a tick under way.
+            await asyncio.to_thread(scheduler.stop)
+
+
 def create_app(context: AppContext) -> FastAPI:
-    app = FastAPI(title="CoinPilot", version="0.1.0")
+    app = FastAPI(title="CoinPilot", version="0.1.0", lifespan=_lifespan)
     app.state.context = context
     app.add_exception_handler(RequestValidationError, _validation_error)
     app.add_exception_handler(OperationalError, _database_error)

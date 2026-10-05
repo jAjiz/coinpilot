@@ -6,8 +6,10 @@ from datetime import timedelta
 from decimal import Decimal
 
 import pytest
+from fastapi.testclient import TestClient
 
 import core.scheduler as scheduler_module
+from api.app import create_app
 from core.config import SchedulerConfig
 from core.db.orders import record_attempt
 from core.db.proposals import get_proposal
@@ -307,3 +309,53 @@ def test_retention_runs_on_the_first_tick_of_each_day(scheduler, db_session, mak
     assert list_evaluations(db_session, user.id) == []
     assert scheduler.tick(now + timedelta(hours=1)).swept is False
     assert scheduler.tick(now + timedelta(days=1)).swept is True
+
+
+def test_a_tick_that_raises_does_not_end_the_loop(app_context, monkeypatch):
+    scheduler = Scheduler(_with(app_context, tick=timedelta(0)))
+    calls = []
+
+    def tick(now):
+        calls.append(now)
+        if len(calls) == 1:
+            raise RuntimeError("the database went away")
+        scheduler.stop()
+
+    monkeypatch.setattr(scheduler, "tick", tick)
+
+    scheduler.run()
+
+    assert len(calls) == 2
+
+
+def test_the_application_starts_and_stops_the_scheduler(app_context, scheduler_lock):
+    # Every tick finds the tick taken, so the thread touches nothing while the test runs.
+    scheduler_lock.held = True
+    app = create_app(_with(app_context, enabled=True, tick=timedelta(hours=1)))
+
+    with TestClient(app):
+        scheduler = app.state.scheduler
+        assert scheduler.running
+
+    assert not scheduler.running
+
+
+def test_the_application_starts_no_scheduler_when_it_is_off(app_context):
+    app = create_app(app_context)
+
+    with TestClient(app):
+        assert app.state.scheduler is None
+
+
+def test_starting_fills_the_next_runs_that_are_missing(
+    app_context, db_session, scheduler_lock, make_user, now
+):
+    scheduler_lock.held = True
+    user = make_user()
+    create_settings(db_session, user.id, fiat="EUR")
+    scheduler = Scheduler(_with(app_context, tick=timedelta(hours=1)))
+
+    scheduler.start()
+    scheduler.stop()
+
+    assert get_settings(db_session, user.id).next_rebalance_at > now

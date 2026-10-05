@@ -32,7 +32,7 @@ from core.execution import (
 )
 from core.public_market import TickMarket
 from core.rebalance import propose, rebalance_now
-from core.schedule import INVEST, REBALANCE, next_run
+from core.schedule import INVEST, REBALANCE, backfill, next_run
 
 logger = logging.getLogger("coinpilot.scheduler")
 
@@ -84,6 +84,37 @@ class Scheduler:
         self._swept_on: date | None = None
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        """Fill any missing next run, then tick on a thread of its own until `stop`."""
+        with self._context.sessions() as session:
+            filled = backfill(session, self._context.now(), self._config)
+        if filled:
+            logger.info("scheduled %d users that had no next run", filled)
+        self._stop.clear()
+        self._thread = threading.Thread(target=self.run, name="coinpilot-scheduler", daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        """End the loop and wait for it. A tick under way finishes first: cutting an
+        evaluation short between an order and its answer is what §9.2 guards against, and
+        there is no reason to cause one."""
+        self._stop.set()
+        if self._thread is not None and self._thread is not threading.current_thread():
+            self._thread.join()
+
+    @property
+    def running(self) -> bool:
+        return self._thread is not None and self._thread.is_alive()
+
+    def run(self) -> None:
+        """Tick, wait, repeat until `stop`. A tick that raises is logged, and the loop goes on."""
+        while not self._stop.is_set():
+            try:
+                self.tick(self._context.now())
+            except Exception:
+                logger.exception("a scheduler tick failed")
+            self._stop.wait(self._config.tick.total_seconds())
 
     def tick(self, now: datetime) -> TickReport:
         """One pass: the users due at `now`, a batch at most, most overdue first."""

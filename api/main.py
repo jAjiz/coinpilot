@@ -6,6 +6,7 @@ module, and no test runs it.
 
 from __future__ import annotations
 
+import logging
 import os
 from datetime import UTC, datetime
 from functools import partial
@@ -28,7 +29,18 @@ from exchange.limits import KeyLimiter
 KRAKEN_MIN_INTERVAL_SECONDS = 1.0
 
 
+def _log_to_stderr() -> None:
+    """`coinpilot.*` at INFO, so the scheduler's alerts and recoveries are seen. Uvicorn
+    configures only its own loggers."""
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    root = logging.getLogger("coinpilot")
+    root.addHandler(handler)
+    root.setLevel(logging.INFO)
+
+
 def build() -> FastAPI:
+    _log_to_stderr()
     config = load_config(os.environ)
     configure(config.database_url)
 
