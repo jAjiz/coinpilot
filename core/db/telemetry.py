@@ -58,9 +58,10 @@ def keep_snapshot(
     day as `as_of`, and add one otherwise.
 
     One point a day is the resolution a performance chart needs, and the latest read is
-    still what `GET /portfolio` shows.
+    still what `GET /portfolio` shows. The latest row is locked while this decides: a
+    refresh racing an evaluation's pin waits for it, and then sees the row pinned.
     """
-    latest = latest_snapshot(session, user_id)
+    latest = latest_snapshot(session, user_id, for_update=True)
     if latest is not None and not latest.pinned and _day(latest.as_of) == _day(as_of):
         latest.as_of = as_of
         latest.fiat = fiat
@@ -84,14 +85,22 @@ def _day(moment: datetime) -> date:
     return moment.astimezone(UTC).date()
 
 
-def latest_snapshot(session: Session, user_id: uuid.UUID) -> PortfolioSnapshot | None:
-    """What `GET /portfolio` returns immediately, with its own `as_of`."""
+def latest_snapshot(
+    session: Session, user_id: uuid.UUID, *, for_update: bool = False
+) -> PortfolioSnapshot | None:
+    """What `GET /portfolio` returns immediately, with its own `as_of`.
+
+    `for_update` locks the row until the transaction ends, and reads it afresh rather than
+    from the session's identity map.
+    """
     stmt = (
         select(PortfolioSnapshot)
         .where(PortfolioSnapshot.user_id == user_id)
         .order_by(PortfolioSnapshot.as_of.desc())
         .limit(1)
     )
+    if for_update:
+        stmt = stmt.with_for_update().execution_options(populate_existing=True)
     return session.execute(stmt).scalars().first()
 
 

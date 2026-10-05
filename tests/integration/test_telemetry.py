@@ -2,8 +2,10 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
+from sqlalchemy import event, update
 from sqlalchemy.orm import Session
 
+from core.db.models import PortfolioSnapshot
 from core.db.telemetry import (
     delete_evaluations_before,
     finish_evaluation,
@@ -180,6 +182,30 @@ def test_a_pinned_snapshot_is_never_overwritten(db_session: Session, make_user):
     assert again.id == later.id
     assert pinned.total_value == D("100")
     assert [snapshot.pinned for snapshot in _series(db_session, user.id)] == [True, False]
+
+
+def test_a_pin_from_another_session_is_seen_and_the_row_is_locked_while_deciding(
+    db_session: Session, make_user
+):
+    """A refresh racing an evaluation's pin: the latest row is locked and read afresh, so a
+    pin that landed first is seen, and one that lands later waits for the decision."""
+    user = make_user()
+    kept = _keep(db_session, user.id, DAY, "100")
+    # The pin as another session commits it: behind this session's back, not through its objects.
+    db_session.execute(update(PortfolioSnapshot).where(PortfolioSnapshot.id == kept.id).values(pinned=True))
+    statements = []
+
+    def listen(conn, cursor, statement, *rest):
+        statements.append(statement)
+
+    event.listen(db_session.connection(), "before_cursor_execute", listen)
+    try:
+        later = _keep(db_session, user.id, DAY + timedelta(hours=1), "120")
+    finally:
+        event.remove(db_session.connection(), "before_cursor_execute", listen)
+
+    assert later.id != kept.id
+    assert any("FOR UPDATE" in statement for statement in statements)
 
 
 def test_a_snapshot_cannot_be_pinned_by_another_user(db_session: Session, make_user):
