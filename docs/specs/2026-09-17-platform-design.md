@@ -490,6 +490,13 @@ The scheduler ticks on a fixed short interval (environment parameter, default 60
 tick runs one indexed query: the users whose `next_invest_at` or `next_rebalance_at` has
 passed. Which one is due decides whether the plan may contain sells.
 
+What the selection read can change before anything is sent. The module that sends reads
+the settings again under the user's lock, just before the first order: a scheduled
+investment sends nothing once `invest_cash_enabled` is off or the user is `paused`, and an
+automatic rebalance nothing once `auto_rebalance_enabled` is off or the user is `paused`.
+Either ends `NOTHING_TO_DO` and says why. An investment by hand (`POST /invest`) is the
+user asking, and neither setting applies to it.
+
 Public prices are fetched **once per tick and shared**. Only private calls multiply per
 user, and since Kraken's rate limit is counted per key, those calls do not contend.
 A tick reads the prices of every pair its batch is configured with in one `Ticker` call,
@@ -570,6 +577,14 @@ is merely not listed yet is a wait and does not count, and a refused order is Kr
 answer and does not count either. A user without a key yet is skipped without counting.
 The streak is `user_settings.failure_streak`, so a restart does not reset it. The alert
 is a log line until project 2 brings notifications.
+
+Retention runs on the first tick of each UTC day. A retention that fails is logged and
+tried again on the next tick, and the tick goes on to the users due: housekeeping never
+stops an evaluation.
+
+A scheduler log line names the user by id and nothing else about them. A database error's
+text omits the statement's bound values (the engine hides them), since those are balances
+and amounts read with the user's key.
 
 ## 11. API surface
 
