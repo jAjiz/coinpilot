@@ -68,6 +68,9 @@ def _anchored(cadence: Cadence, user_id: uuid.UUID, now: datetime, window: timed
     months = cadence.interval_months or 0
     if cadence.anchor is None or days + months == 0:
         raise ValueError("an INTERVAL cadence needs a length and an anchor")
+    if days < 0 or months < 0:
+        # The API forbids it; a hand-edited row would otherwise walk backwards forever.
+        raise ValueError("an INTERVAL cadence cannot have a negative length")
     anchor = cadence.anchor.astimezone(UTC)
     shift = timedelta(seconds=offset_seconds(user_id, int(window.total_seconds())))
 

@@ -114,3 +114,18 @@ def test_an_anchor_given_in_another_zone_is_read_as_its_instant_in_utc():
 def test_an_interval_cadence_without_an_anchor_is_refused():
     with pytest.raises(ValueError):
         _slot(Cadence(CadenceMode.INTERVAL, interval_days=1), _at(2026, 10, 5))
+
+
+@pytest.mark.parametrize(
+    ("days", "months"),
+    [(-1, 0), (0, -1), (2, -1), (-30, 2), (-1, -1)],
+)
+def test_a_negative_length_is_refused_rather_than_walked_forever(days, months):
+    """The API forbids it, the database does not: a hand-edited row must fail one user, not
+    spin the tick thread."""
+    cadence = Cadence(
+        CadenceMode.INTERVAL, interval_days=days, interval_months=months, anchor=_at(2026, 1, 1)
+    )
+
+    with pytest.raises(ValueError):
+        _slot(cadence, _at(2026, 10, 5))
