@@ -525,7 +525,8 @@ the same user. Intent is honoured to the hour, and a thousand monthly users spre
 offset spreads across the whole interval.
 
 A missed run — the system was down — recomputes **forward** to the next slot. One
-evaluation, never three accumulated.
+evaluation, never three accumulated. A pause is different: the user chose it, so lifting
+it moves both next runs to the first slot after now, and nothing missed while paused runs.
 
 Each tick processes a **bounded batch**. After an outage every user is overdue at once,
 and without a cap the recovery is a stampede at the worst possible moment.

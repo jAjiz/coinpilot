@@ -21,9 +21,12 @@ INVEST = "invest"
 REBALANCE = "rebalance"
 
 # The settings each next run is computed from. A change to any of them recomputes it.
+# `paused` too: the tick skips a paused user, so their runs fall behind, and lifting the
+# pause must wait for the next slot rather than run what was missed at once.
 SOURCES = {
     INVEST: frozenset(
         {
+            "paused",
             "invest_cash_enabled",
             "invest_cadence_mode",
             "invest_interval_days",
@@ -33,6 +36,7 @@ SOURCES = {
     ),
     REBALANCE: frozenset(
         {
+            "paused",
             "rebalance_cadence_mode",
             "rebalance_interval_days",
             "rebalance_interval_months",

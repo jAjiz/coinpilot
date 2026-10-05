@@ -164,6 +164,24 @@ def test_a_new_cadence_moves_its_next_run(api, db_session, make_user, login):
     )
 
 
+def test_unpausing_waits_for_the_next_slot_instead_of_running_at_once(
+    api, app_context, db_session, make_user, login
+):
+    """The tick skips a paused user, so the runs they missed are left in the past. Lifting the
+    pause must not make them due on the next tick, off their cadence."""
+    user = make_user()
+    headers = login(user)
+    api.patch("/config", json={"fiat": "EUR", "invest_cash_enabled": True, "paused": True}, headers=headers)
+    missed = app_context.now() - timedelta(days=10)
+    update_settings(db_session, user.id, next_invest_at=missed, next_rebalance_at=missed)
+
+    api.patch("/config", json={"paused": False}, headers=headers)
+
+    settings = get_settings(db_session, user.id)
+    assert settings.next_invest_at > app_context.now()
+    assert settings.next_rebalance_at > app_context.now()
+
+
 def test_a_change_to_anything_else_leaves_the_schedule_alone(api, db_session, make_user, login):
     user = make_user()
     headers = login(user)
