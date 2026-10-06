@@ -189,6 +189,17 @@ def rebalance_now(context: ExecutionContext, user_id: uuid.UUID) -> EvaluationRe
     )
 
 
+def _why_nothing(document: Mapping, log: list[str]) -> str:
+    """Why a plan has nothing to send. No leg at all: nothing drifts past the threshold. Legs
+    that are all skipped: the drift is there, and each is logged with the note that stopped it."""
+    skipped = [leg for leg in document["legs"] if leg["note"] is not None]
+    if not skipped:
+        return "the drift is below the threshold"
+    for leg in skipped:
+        log.append(f"{leg['asset']}: {leg['side']} skipped, {leg['note']}")
+    return "no order can be sent"
+
+
 def _keep(
     session: Session, user_id: uuid.UUID, document: Mapping, trigger: ProposalTrigger, log: list[str]
 ) -> None:
@@ -202,11 +213,12 @@ def _keep(
     slot = db.get_proposal(session, user_id)
     live = slot is not None and slot.status == ProposalStatus.LIVE
     if not has_orders(document):
+        reason = _why_nothing(document, log)
         if live:
             db.withdraw(session, user_id)
-            log.append("the drift is below the threshold; the proposal was withdrawn")
+            log.append(f"{reason}; the proposal was withdrawn")
         else:
-            log.append("the drift is below the threshold; nothing to propose")
+            log.append(f"{reason}; nothing to propose")
         return
     if live and not is_material(slot.plan, document):
         log.append(f"proposal version {slot.version} still stands")

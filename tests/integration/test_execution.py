@@ -119,6 +119,8 @@ def test_no_free_cash_is_nothing_to_do(app_context, fake_kraken, ready):
 
     assert result.status is EvaluationStatus.NOTHING_TO_DO
     assert fake_kraken.placed == []
+    # The session says why, not an empty log.
+    assert result.messages == ("the plan has no orders; nothing was sent",)
 
 
 def test_a_leg_under_krakens_minimum_is_skipped_and_the_rest_is_sent(app_context, fake_kraken, ready):

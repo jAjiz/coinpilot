@@ -433,6 +433,9 @@ def _evaluate(
         return EvaluationStatus.PARTIAL
     if any(leg.status is not LegStatus.SKIPPED for leg in legs):
         return EvaluationStatus.DONE
+    if not legs:
+        # Skipped legs log their own notes; an empty plan would otherwise leave no trace.
+        log.append("the plan has no orders; nothing was sent")
     return EvaluationStatus.NOTHING_TO_DO
 
 
