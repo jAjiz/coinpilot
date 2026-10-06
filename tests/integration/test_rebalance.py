@@ -355,3 +355,15 @@ def test_pausing_after_the_evaluation_started_stops_the_rebalance(
     assert any("paused" in message for message in result.messages)
     assert fake_kraken.placed == []
     assert list_orders(db_session, user.id) == []
+
+
+def test_a_plan_whose_orders_are_all_too_small_says_so(app_context, fake_kraken, user):
+    """Off target, but by less than Kraken's minimum: the drift is not the reason."""
+    fake_kraken.balance = {"ZEUR": "0", "XXBT": "0.01", "XETH": "0.2002"}
+
+    result = propose(app_context, user.id)
+
+    assert result.evaluation.status is EvaluationStatus.NOTHING_TO_DO
+    messages = result.evaluation.messages
+    assert any(m.startswith("ETH: sell skipped, ") and "below the minimum" in m for m in messages)
+    assert messages[-1] == "no order can be sent; nothing to propose"

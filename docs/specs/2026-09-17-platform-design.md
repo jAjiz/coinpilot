@@ -490,6 +490,13 @@ The scheduler ticks on a fixed short interval (environment parameter, default 60
 tick runs one indexed query: the users whose `next_invest_at` or `next_rebalance_at` has
 passed. Which one is due decides whether the plan may contain sells.
 
+The slot is exact; the evaluation is not. It runs on the first tick after the slot, so up
+to one interval later. The wait between ticks starts when a tick ends, so a tick's own
+duration shifts the next one: over hours, the delay after a fixed slot drifts through the
+whole interval and wraps, and one gap between two evaluations is an interval shorter
+(measured on 2026-10-06: a 15-minute cadence with a 60 s tick drifted about a second each
+quarter hour, and one gap was 14 minutes). Nothing depends on the exact second.
+
 What the selection read can change before anything is sent. The module that sends reads
 the settings again under the user's lock, just before the first order: a scheduled
 investment sends nothing once `invest_cash_enabled` is off or the user is `paused`, and an
