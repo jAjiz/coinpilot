@@ -9,7 +9,7 @@ credential.
 
 **Architecture:** The code changes are the production hardening earlier phases deferred:
 `core/logs.py` keeps OAuth codes and PostgreSQL row values out of the log,
-`KeyLimiter` forgets idle keys, and `core/rotation.py` re-seals every stored credential
+the Kraken rate limiter counts per user, and `core/rotation.py` re-seals every stored credential
 under the active master key. The image is one `Dockerfile`. Everything the host runs is
 in `deploy/`: a compose file (PostgreSQL, a one-shot migration, the platform), a wrapper
 around `docker compose`, and `deploy.sh`, which backs up, migrates, starts and waits for
@@ -92,7 +92,8 @@ has a test or a CI check in the task that owns it.
 |---|---|
 | `core/logs.py` | `configure()`; `Formatter` drops `DETAIL:` lines; `WithoutQuery` strips the query from uvicorn's access log |
 | `api/main.py` | Calls `logs.configure()` instead of its own `_log_to_stderr` |
-| `exchange/limits.py` | `KeyLimiter` forgets keys idle for `idle` seconds; `known_keys()` |
+| `exchange/client.py` | `KrakenClient(..., bucket=)`: what the limiter counts private calls under |
+| `api/context.py`, `core/execution.py`, `api/routes/credentials.py`, `api/routes/portfolio.py` | `kraken_for(user_id, credentials)` counts under the user |
 | `core/crypto.py` | `CredentialCipher.active_version` |
 | `core/db/users.py` | `credential_owners_not_at`, `lock_credentials` |
 | `core/database.py` | Exports the two |
@@ -132,11 +133,10 @@ the user chose while this plan was written.
   (`-L 8000:localhost:8000`), so the Google callback stays
   `http://localhost:8000/auth/callback/google` and the OAuth client needs no change.
   Exposing it is project 2 (§16).
-- **A static external IP.** The VM needs outbound access to Kraken, GHCR and Debian. An
-  ephemeral address would do, but a static one lets the Kraken key be restricted to it,
-  which turns a stolen key into one that works from nowhere else. Costs a few euros a
-  month. Cloud NAT would avoid the external address, for about the same price and one
-  more moving part.
+- **An ephemeral external IP, no static one.** The VM needs outbound access to Kraken,
+  GHCR and Debian, and an external address is the simplest way to it. Restricting the
+  Kraken key to a fixed IP is left out: the key is already refused if it can withdraw
+  (§5.2). Reserving the address later is one command, if that changes.
 - **The image is public.** The repository is public, so the image holds nothing that
   is not, and the host pulls with no registry credential. Tags are full commit SHAs and
   never move; there is no `latest`.
@@ -174,7 +174,7 @@ the user chose while this plan was written.
   credentials in a restored dump.
 - **Deferred items from earlier phases, settled here:** the uvicorn access log no longer
   carries the callback's `code` (phase 4); PostgreSQL's `DETAIL:` lines no longer reach
-  the log (phase 7); `KeyLimiter` forgets idle keys (phase 4); `stop()` waiting for the
+  the log (phase 7); the rate limiter holds one entry per user, not one per key ever tried (phase 4); `stop()` waiting for the
   batch is now what `stop_grace_period` is sized for (phase 7). Two stay deferred, see
   below.
 
@@ -392,159 +392,160 @@ git commit -m "feat(logs): no OAuth code in the access log and no PostgreSQL DET
 
 ---
 
-### Task 2: The limiter forgets idle keys
+### Task 2: One limiter entry per user
 
 **Files:**
-- Modify: `exchange/limits.py`
-- Test: `tests/unit/exchange/test_limits.py`
+- Modify: `exchange/client.py`, `api/context.py`, `core/execution.py`,
+  `api/routes/credentials.py`, `api/routes/portfolio.py`
+- Test: `tests/unit/exchange/test_client.py`, `tests/integration/test_api_credentials.py`
 
 **Interfaces:**
-- Consumes: nothing.
-- Produces: `KeyLimiter(min_interval, *, now, sleep, clock, idle: float = IDLE_SECONDS)`;
-  `KeyLimiter.known_keys() -> frozenset[str]`; `exchange.limits.IDLE_SECONDS = 600.0`.
+- Consumes: `KeyLimiter.wait_turn(bucket)`, `KeyLimiter.next_nonce(bucket)` (unchanged).
+- Produces: `KrakenClient(http, limiter, credentials=None, *, bucket: str | None = None)`
+  — private calls pace and count nonces under `bucket`, or under the API key when it is
+  `None`; `AppContext.kraken_for(user_id: uuid.UUID, credentials) -> KrakenClient`, and
+  the same signature on the `ExecutionContext` protocol.
 
-Every key `POST /credentials` is sent, wrong ones included, stays in the limiter's two
-dicts until the process restarts. Forgetting a key is safe for pacing (a key unused for
-ten minutes owes no wait) and for the nonce: the next one comes from the clock, which is
-ten minutes ahead of the last one unless the clock went back by more than that.
+The limiter's two dicts are keyed by API key, and every key sent to
+`POST /credentials`, wrong ones included, stays in them until the process restarts.
+Keyed by user instead, the limiter holds at most one entry per user (plus the public
+bucket), as the database holds at most one credential per user.
+
+Nothing is lost by it. A user has one key at a time. While they register a new one, the
+validation and a scheduled evaluation with the old one share one pace, which is only
+more conservative than Kraken requires. Their nonces come from one counter, which still
+increases for each key, and a new key accepts any first nonce. `scripts/check_key.py`
+has no user and passes no bucket, so it still counts under the key.
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `tests/unit/exchange/test_limits.py`:
+Append to `tests/unit/exchange/test_client.py`:
 
 ```python
-def _idle_limiter(clock: FakeClock, idle: float = 600.0) -> KeyLimiter:
-    return KeyLimiter(1.0, now=clock.now, sleep=clock.sleep, clock=clock.time, idle=idle)
+OTHER_CREDENTIALS = Credentials(api_key="ANOTHER-PUBLIC-KEY", api_secret=CREDENTIALS.api_secret)
 
 
-def test_a_key_idle_past_the_limit_is_forgotten():
-    clock = FakeClock()
-    limiter = _idle_limiter(clock)
-    limiter.wait_turn("key-a")
-    clock.monotonic += 601
+class RecordingLimiter(KeyLimiter):
+    """Paces nothing, and remembers the bucket of every call."""
 
-    limiter.wait_turn("key-b")
+    def __init__(self) -> None:
+        super().__init__(0.0)
+        self.buckets: list[str] = []
 
-    assert limiter.known_keys() == frozenset({"key-b"})
-
-
-def test_a_key_used_within_the_limit_is_kept():
-    clock = FakeClock()
-    limiter = _idle_limiter(clock)
-    limiter.wait_turn("key-a")
-    clock.monotonic += 300
-    limiter.wait_turn("key-a")
-    clock.monotonic += 301
-
-    limiter.wait_turn("key-b")
-
-    assert limiter.known_keys() == frozenset({"key-a", "key-b"})
+    def wait_turn(self, bucket: str) -> None:
+        self.buckets.append(bucket)
 
 
-def test_a_forgotten_key_still_gets_a_larger_nonce():
-    clock = FakeClock()
-    limiter = _idle_limiter(clock)
-    limiter.wait_turn("key-a")
-    first = int(limiter.next_nonce("key-a"))
-    clock.monotonic += 601
-    clock.wall += 601
-    limiter.wait_turn("key-b")
-    assert "key-a" not in limiter.known_keys()
-
-    assert int(limiter.next_nonce("key-a")) > first
+def _balance_answer(request):
+    return httpx.Response(200, json={"error": [], "result": {"ZEUR": "1"}})
 
 
-def test_by_default_a_key_is_forgotten_after_ten_minutes():
-    clock = FakeClock()
-    limiter = _limiter(clock)
-    limiter.wait_turn("key-a")
-    clock.monotonic += 599
-    limiter.wait_turn("key-b")
-    assert "key-a" in limiter.known_keys()
-    clock.monotonic += 2
+def _recording_client(limiter, credentials, bucket=None):
+    http = httpx.Client(base_url="https://api.kraken.com", transport=httpx.MockTransport(_balance_answer))
+    return KrakenClient(http, limiter, credentials=credentials, bucket=bucket)
 
-    limiter.wait_turn("key-b")
 
-    assert "key-a" not in limiter.known_keys()
+def test_a_private_call_counts_under_the_bucket_it_was_given():
+    limiter = RecordingLimiter()
+
+    _recording_client(limiter, CREDENTIALS, bucket="user-1")._call_private("Balance")
+    _recording_client(limiter, OTHER_CREDENTIALS, bucket="user-1")._call_private("Balance")
+
+    assert limiter.buckets == ["user-1", "user-1"]
+
+
+def test_with_no_bucket_a_private_call_counts_under_its_key():
+    limiter = RecordingLimiter()
+
+    _recording_client(limiter, CREDENTIALS)._call_private("Balance")
+
+    assert limiter.buckets == ["THE-PUBLIC-KEY"]
 ```
 
-The last test: at 599 s no sweep runs (the first sweep is due 600 s after the limiter was
-built). At 601 s the sweep runs and `key-a`, last used at 0 s, is past the cutoff.
+Append to `tests/integration/test_api_credentials.py`, with `import dataclasses` and
+`from exchange.limits import KeyLimiter` added to its imports, and a copy of the
+`RecordingLimiter` class above (the integration tests import nothing from `tests.unit`):
+
+```python
+def test_the_keys_a_user_tries_are_paced_as_one(app_context, make_user):
+    limiter = RecordingLimiter()
+    context = dataclasses.replace(app_context, limiter=limiter)
+    user = make_user()
+
+    context.kraken_for(user.id, Credentials("FIRST-KEY", "c2VjcmV0"))._call_private("Balance")
+    context.kraken_for(user.id, Credentials("SECOND-KEY", "c2VjcmV0"))._call_private("Balance")
+
+    assert limiter.buckets == [str(user.id), str(user.id)]
+```
+
+`FakeKraken` (the `fake_kraken` fixture behind `app_context.kraken_http`) answers
+`Balance`; if it answers it only for a key it was given, use the key and secret it
+expects, as the other tests in the file do. The test is about the bucket, not the answer.
 
 - [ ] **Step 2: Run them to verify they fail**
 
-Run: `.venv/Scripts/python.exe -m pytest tests/unit/exchange/test_limits.py -v`
-Expected: the four new tests FAIL with `TypeError` (unexpected keyword `idle`) or
-`AttributeError` (`known_keys`).
+Run the test command on `tests/unit/exchange/test_client.py tests/integration/test_api_credentials.py`.
+Expected: FAIL with `TypeError` (unexpected keyword `bucket`; `kraken_for` takes one
+argument).
 
 - [ ] **Step 3: Implement**
 
-In `exchange/limits.py`, below `PUBLIC_BUCKET`:
+`exchange/client.py`, `KrakenClient.__init__` gains a keyword-only argument and stores it:
 
 ```python
-# A key unused this long is forgotten. Every key sent to `POST /credentials`, wrong ones
-# included, would otherwise stay in memory until the process restarts.
-IDLE_SECONDS = 600.0
+    def __init__(
+        self,
+        http: httpx.Client,
+        limiter: KeyLimiter,
+        credentials: Credentials | None = None,
+        *,
+        bucket: str | None = None,
+    ) -> None:
+        self._http = http
+        self._limiter = limiter
+        self._credentials = credentials
+        # What the limiter counts this identity under: the user, when there is one, so the
+        # limiter holds one entry per user however many keys they try.
+        self._bucket = bucket
 ```
 
-`__init__` gains `idle: float = IDLE_SECONDS` as its last keyword argument, and stores:
+In `_call_private`, replace the two limiter lines with:
 
 ```python
-        self._idle = idle
-        self._swept = now()
+        bucket = self._bucket or credentials.api_key
+        self._limiter.wait_turn(bucket)
+        nonce = self._limiter.next_nonce(bucket)
 ```
 
-(`now` is the constructor argument, so the fake clock is used in tests.)
-
-`wait_turn` sweeps first, inside the guard; its body becomes:
+`api/context.py`:
 
 ```python
-        with self._guard:
-            now = self._now()
-            self._forget_idle(now)
-            previous = self._last_call.get(bucket)
-            wait = 0.0 if previous is None else previous + self._min_interval - now
-            self._last_call[bucket] = now + max(wait, 0.0)
-
-        if wait > 0:
-            self._sleep(wait)
+    def kraken_for(self, user_id: uuid.UUID, credentials: Credentials) -> KrakenClient:
+        """A client for one request. The limiter is shared and counts per user: one entry
+        per user, however many keys they try, as the database holds one."""
+        return KrakenClient(self.kraken_http, self.limiter, credentials=credentials, bucket=str(user_id))
 ```
 
-And two new methods:
+`core/execution.py`, the protocol: `def kraken_for(self, user_id: uuid.UUID, credentials: Credentials): ...`,
+and both call sites become `context.kraken_for(user_id, context.cipher.unseal(user_id, account.sealed))`.
 
-```python
-    def known_keys(self) -> frozenset[str]:
-        """The buckets the limiter holds state for."""
-        with self._guard:
-            return frozenset(self._last_call)
+`api/routes/credentials.py`: `validate_key(context.kraken_for(user.id, credentials))`.
+`api/routes/portfolio.py`: `context.kraken_for(user.id, credentials)`.
 
-    def _forget_idle(self, now: float) -> None:
-        """At most once per idle period, drop every bucket unused for that long. Called
-        with the guard held.
+Then `grep -rn "kraken_for(" api core tests` must show no call with one argument; the
+scheduler's tick context delegates to the application's, so it needs no change, but
+check it.
 
-        A forgotten key's next nonce comes from the clock again, which is ahead of its
-        last one unless the clock went back by more than `idle`.
-        """
-        if now - self._swept < self._idle:
-            return
-        self._swept = now
-        cutoff = now - self._idle
-        for bucket in [bucket for bucket, last in self._last_call.items() if last < cutoff]:
-            del self._last_call[bucket]
-            self._last_nonce.pop(bucket, None)
-```
+- [ ] **Step 4: Run the whole suite**
 
-- [ ] **Step 4: Run the tests to verify they pass**
-
-Run: `.venv/Scripts/python.exe -m pytest tests/unit/exchange/test_limits.py -v`
-Expected: PASS, the existing tests included.
+Run the test command. Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-.venv/Scripts/python.exe -m ruff format exchange/limits.py tests/unit/exchange/test_limits.py
-git add exchange/limits.py tests/unit/exchange/test_limits.py
-git commit -m "fix(limits): forget a key unused for ten minutes"
+.venv/Scripts/python.exe -m ruff format exchange api core tests
+git add exchange/client.py api/context.py core/execution.py api/routes/credentials.py api/routes/portfolio.py tests/unit/exchange/test_client.py tests/integration/test_api_credentials.py
+git commit -m "fix(limits): count Kraken calls per user, so the limiter holds one entry per user"
 ```
 
 ---
@@ -1635,14 +1636,11 @@ internet: SSH arrives through IAP, and the API listens on the VM's loopback. Ima
 gcloud config set project "$PROJECT"
 gcloud services enable compute.googleapis.com iap.googleapis.com iamcredentials.googleapis.com sts.googleapis.com
 
-# A static address, so the Kraken key can be restricted to it.
-gcloud compute addresses create "$VM" --region "$REGION"
-
 gcloud compute instances create "$VM" --zone "$ZONE" \
   --machine-type e2-small \
   --image-family debian-13 --image-project debian-cloud \
   --boot-disk-size 20GB --boot-disk-type pd-balanced \
-  --address "$VM" \
+\
   --metadata enable-oslogin=TRUE \
   --shielded-secure-boot --shielded-vtpm --shielded-integrity-monitoring \
   --no-service-account --no-scopes
@@ -1763,10 +1761,6 @@ operations keep failing appears once, as
 `WARNING coinpilot.scheduler: user <id>: 3 scheduled operations in a row have failed`:
 `./compose.sh logs platform | grep WARNING`.
 
-**10. Restricting the Kraken key to the VM.** In Kraken → API → the key → "IP address
-allowlist": the static address (`gcloud compute addresses describe "$VM" --region
-"$REGION" --format 'value(address)'`). The key then works from the VM alone; your local
-`scripts/check_key.py` will be refused, which is the point.
 
 - [ ] **Step 4: Run shellcheck**
 
@@ -1879,9 +1873,8 @@ git commit -m "docs: the spec and the README describe the deployment"
 
 ## What you verify before calling project 1 done
 
-The roadmap's check: deploy, roll back, and rotate the master key. Done on the real
-account, it also moves your history from the development database to production, and
-that move is itself a real rotation.
+The roadmap's check: deploy, roll back, and rotate the master key. Production starts
+from an empty database; the development database stays where it is.
 
 ### 1. Merge, and let Release build
 
@@ -1891,57 +1884,37 @@ from your machine with no login.
 
 ### 2. Provision
 
-Runbook §2 and §3, on a new project or an existing one. Then from outside Google Cloud
-(your own machine is fine):
+Runbook §2 and §3. Then, from outside Google Cloud (your own machine is fine), with the
+VM's external address
+(`gcloud compute instances describe "$VM" --zone "$ZONE" --format 'value(networkInterfaces[0].accessConfigs[0].natIP)'`):
 
 ```bash
-nc -vz -w 5 <static ip> 22
-nc -vz -w 5 <static ip> 8000
+nc -vz -w 5 <external ip> 22
+nc -vz -w 5 <external ip> 8000
 ```
 
 Both must time out. `gcloud compute ssh … --tunnel-through-iap` must work.
 
-### 3. Move the development database, rotating its key
+### 3. First deploy, from zero
 
-Your local database holds the order ledger and snapshots, which cannot be rebuilt.
+1. **Stop the local API** and leave it stopped while production runs. Two schedulers on
+   one Kraken account would both invest.
+2. Actions → Deploy → `deploy`, with the merge SHA. The migration builds the schema in
+   the empty database.
+3. Open the tunnel (runbook §4), sign in at `/auth/login/google`, and set yourself up as
+   you did in development: `POST /credentials` with your Kraken key, `PUT /assets/…` for
+   each target, `PATCH /config`. Start with `invest_cash_enabled` and
+   `auto_rebalance_enabled` off, as in phase 7.
+4. `GET /portfolio` reads your balance. Within 15 minutes `GET /sessions` shows a
+   `PROPOSE` / `SCHEDULER` row.
 
-1. **Stop the local API** and leave it stopped. Two schedulers on one Kraken account
-   would both invest.
-2. Dump the local database:
+### 4. Rotate the master key
 
-   ```bash
-   docker compose -f docker-compose.dev.yml exec -T postgres pg_dump -U coinpilot -Fc coinpilot > coinpilot-dev.dump
-   ```
+Runbook §7 in full, from version 1 to version 2. After step 4 the script reports
+`resealed : 1`; after step 6 `GET /portfolio` still reads your balance with version 1
+gone from `.env`.
 
-3. In the VM's `.env`, set `CREDENTIAL_KEYS=1:<your local key>,2:<a new key generated on
-   the VM>` and `CREDENTIAL_KEY_VERSION=2`. Your local key is in your local `.env`; copy
-   it over the SSH session, not through a chat.
-4. Copy the dump and restore it into an empty production database:
-
-   ```bash
-   gcloud compute scp coinpilot-dev.dump "$VM:~/" --zone "$ZONE" --tunnel-through-iap
-   gcloud compute ssh "$VM" --zone "$ZONE" --tunnel-through-iap
-   sudo mv ~/coinpilot-dev.dump /opt/coinpilot/backups/
-   sudo -i
-   cd /opt/coinpilot
-   ./compose.sh up -d --wait postgres
-   ./compose.sh exec -T postgres pg_restore -U coinpilot -d coinpilot --no-owner < backups/coinpilot-dev.dump
-   ```
-
-5. Actions → Deploy → `deploy`, with the merge SHA. The migration finds the schema at
-   head and does nothing.
-6. Runbook §7, steps 4 to 7: re-seal, check, remove version 1, recreate. Delete
-   `coinpilot-dev.dump` on both machines (`backups/coinpilot-dev.dump` on the VM: it is
-   sealed with version 1, and `deploy.sh` would only remove it after ten more deploys).
-7. Through the tunnel (runbook §4): sign in again (the JWT secret is new), `GET
-   /portfolio` reads your balance, `GET /sessions` shows your history, and within 15
-   minutes a new `PROPOSE` / `SCHEDULER` row.
-
-If you prefer to start clean instead: skip 2 to 4, register your key through the tunnel,
-set your assets and config again, and then do runbook §7 in full with a version 2 key to
-verify rotation.
-
-### 4. Deploy, and roll back
+### 5. Deploy, and roll back
 
 1. Merge anything small (this plan's departures, for example) so Release builds a second
    image. Deploy it.
@@ -1951,21 +1924,20 @@ verify rotation.
    and `GET /sessions` keeps gaining rows.
 4. Deploy the second SHA again.
 
-### 5. Survive a reboot
+### 6. Survive a reboot
 
 `sudo reboot` on the VM. After a minute, through a new tunnel, `/health` answers and
 the scheduler's next row arrives on time.
 
-### 6. Close the remaining doors
+### 7. Close the remaining doors
 
-- Restrict the Kraken key to the static IP (runbook §10). `GET /portfolio` still works
-  from production.
 - Delete the real key from the development database, so it lives only in production:
   `docker compose -f docker-compose.dev.yml exec postgres psql -U coinpilot -c "delete from user_credentials"`.
-- The master key is in your password manager; the old version 1 too, while a dump
-  sealed with it exists.
+- The production master key (version 2) is in your password manager. Delete version 1
+  from it once no dump in `backups/` and no snapshot was taken before the rotation
+  (14 days at most).
 
-### 7. Report
+### 8. Report
 
 Report what each step showed. Anything that differs goes into the departures below and,
 where it is a fact about the platform, into the spec.
