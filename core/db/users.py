@@ -72,6 +72,25 @@ def get_credentials(session: Session, user_id: uuid.UUID) -> UserCredentials | N
     return session.get(UserCredentials, user_id)
 
 
+def credential_owners_not_at(session: Session, version: int) -> list[uuid.UUID]:
+    """The users whose record is sealed under a master key other than `version`."""
+    return list(
+        session.scalars(
+            select(UserCredentials.user_id)
+            .where(UserCredentials.key_version != version)
+            .order_by(UserCredentials.user_id)
+        )
+    )
+
+
+def lock_credentials(session: Session, user_id: uuid.UUID) -> UserCredentials | None:
+    """The record, locked until the transaction ends. A concurrent `save_credentials` waits
+    for it, and then writes over what this transaction wrote."""
+    return session.scalars(
+        select(UserCredentials).where(UserCredentials.user_id == user_id).with_for_update()
+    ).one_or_none()
+
+
 def delete_credentials(session: Session, user_id: uuid.UUID) -> bool:
     """True when a record was removed, false when there was none to remove."""
     record = session.get(UserCredentials, user_id)

@@ -61,10 +61,12 @@ from core.db.telemetry import (
 )
 from core.db.users import (
     create_user,
+    credential_owners_not_at,
     delete_credentials,
     get_credentials,
     get_user,
     get_user_by_identity,
+    lock_credentials,
     save_credentials,
     set_user_status,
 )
@@ -75,6 +77,7 @@ __all__ = [
     "configure",
     "create_settings",
     "create_user",
+    "credential_owners_not_at",
     "delete_asset",
     "delete_credentials",
     "delete_evaluations_before",
@@ -96,6 +99,7 @@ __all__ = [
     "list_assets",
     "list_evaluations",
     "list_orders",
+    "lock_credentials",
     "lock_settings",
     "mark_failed",
     "mark_filled",

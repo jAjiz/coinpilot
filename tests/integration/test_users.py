@@ -8,10 +8,12 @@ from sqlalchemy.orm import Session
 from core.db.types import UserStatus
 from core.db.users import (
     create_user,
+    credential_owners_not_at,
     delete_credentials,
     get_credentials,
     get_user,
     get_user_by_identity,
+    lock_credentials,
     save_credentials,
     set_user_status,
 )
@@ -112,3 +114,30 @@ def test_removing_a_user_removes_their_credentials(db_session: Session, make_use
     db_session.flush()
 
     assert get_credentials(db_session, user.id) is None
+
+
+def _store_at(session: Session, user_id, version: int) -> None:
+    save_credentials(session, user_id, b"cipher", b"n" * 12, version, VALIDATED)
+
+
+def test_the_owners_of_records_under_another_version_are_listed(db_session: Session, make_user):
+    old, current = make_user(), make_user()
+    _store_at(db_session, old.id, 1)
+    _store_at(db_session, current.id, 2)
+
+    owners = credential_owners_not_at(db_session, 2)
+
+    # Membership only: the development database holds the real user's record too.
+    assert old.id in owners
+    assert current.id not in owners
+
+
+def test_a_record_is_locked_and_returned(db_session: Session, make_user):
+    user = make_user()
+    _store_at(db_session, user.id, 1)
+
+    assert lock_credentials(db_session, user.id).key_version == 1
+
+
+def test_locking_a_missing_record_returns_none(db_session: Session, make_user):
+    assert lock_credentials(db_session, make_user().id) is None
