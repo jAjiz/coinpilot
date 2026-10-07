@@ -133,10 +133,12 @@ the user chose while this plan was written.
   (`-L 8000:localhost:8000`), so the Google callback stays
   `http://localhost:8000/auth/callback/google` and the OAuth client needs no change.
   Exposing it is project 2 (§16).
-- **An ephemeral external IP, no static one.** The VM needs outbound access to Kraken,
-  GHCR and Debian, and an external address is the simplest way to it. Restricting the
-  Kraken key to a fixed IP is left out: the key is already refused if it can withdraw
-  (§5.2). Reserving the address later is one command, if that changes.
+- **A static external IP, already reserved by the user.** The VM needs outbound access
+  to Kraken, GHCR and Debian. A static address also lets the Kraken key be restricted to
+  it, so a stolen key works from nowhere else; that adds to the permission contract
+  (§5.2), which already refuses a key that can withdraw. Google charges an external IPv4
+  in use the same whether it is static or ephemeral. The address and the VM must be in
+  the same region.
 - **The image is public.** The repository is public, so the image holds nothing that
   is not, and the host pulls with no registry credential. Tags are full commit SHAs and
   never move; there is no `latest`.
@@ -1636,10 +1638,14 @@ internet: SSH arrives through IAP, and the API listens on the VM's loopback. Ima
 gcloud config set project "$PROJECT"
 gcloud services enable compute.googleapis.com iap.googleapis.com iamcredentials.googleapis.com sts.googleapis.com
 
+# A static address, so the Kraken key can be restricted to it. Skip if it is reserved
+# already; it must be in $REGION.
+gcloud compute addresses create "$VM" --region "$REGION"
+
 gcloud compute instances create "$VM" --zone "$ZONE" \
   --machine-type e2-small \
   --image-family debian-13 --image-project debian-cloud \
-  --boot-disk-size 20GB --boot-disk-type pd-balanced \
+  --boot-disk-size 20GB --boot-disk-type pd-balanced   --address "$VM" \
 \
   --metadata enable-oslogin=TRUE \
   --shielded-secure-boot --shielded-vtpm --shielded-integrity-monitoring \
@@ -1761,6 +1767,10 @@ operations keep failing appears once, as
 `WARNING coinpilot.scheduler: user <id>: 3 scheduled operations in a row have failed`:
 `./compose.sh logs platform | grep WARNING`.
 
+**10. Restricting the Kraken key to the VM.** In Kraken → API → the key → "IP address
+allowlist": the static address (`gcloud compute addresses describe "$VM" --region
+"$REGION" --format 'value(address)'`). The key then works from the VM alone; your local
+`scripts/check_key.py` will be refused, which is the point.
 
 - [ ] **Step 4: Run shellcheck**
 
@@ -1884,13 +1894,11 @@ from your machine with no login.
 
 ### 2. Provision
 
-Runbook §2 and §3. Then, from outside Google Cloud (your own machine is fine), with the
-VM's external address
-(`gcloud compute instances describe "$VM" --zone "$ZONE" --format 'value(networkInterfaces[0].accessConfigs[0].natIP)'`):
+Runbook §2 and §3. Then, from outside Google Cloud (your own machine is fine):
 
 ```bash
-nc -vz -w 5 <external ip> 22
-nc -vz -w 5 <external ip> 8000
+nc -vz -w 5 <static ip> 22
+nc -vz -w 5 <static ip> 8000
 ```
 
 Both must time out. `gcloud compute ssh … --tunnel-through-iap` must work.
@@ -1931,6 +1939,8 @@ the scheduler's next row arrives on time.
 
 ### 7. Close the remaining doors
 
+- Restrict the Kraken key to the static IP (runbook §10). `GET /portfolio` still works
+  from production.
 - Delete the real key from the development database, so it lives only in production:
   `docker compose -f docker-compose.dev.yml exec postgres psql -U coinpilot -c "delete from user_credentials"`.
 - The production master key (version 2) is in your password manager. Delete version 1
