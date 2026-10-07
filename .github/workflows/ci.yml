@@ -57,3 +57,20 @@ jobs:
 
       - name: Tests
         run: pytest tests --cov-fail-under=80
+
+  image:
+    name: Image and deploy script
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      - name: Build
+        run: docker build -t ghcr.io/jajiz/coinpilot:ci-1 .
+
+      - name: Runs as an unprivileged user
+        run: test "$(docker run --rm ghcr.io/jajiz/coinpilot:ci-1 id -u)" = 10001
+
+      - name: Imports the application and the scripts
+        run: docker run --rm ghcr.io/jajiz/coinpilot:ci-1 python -c "import api.main, scripts.rotate_master_key"
