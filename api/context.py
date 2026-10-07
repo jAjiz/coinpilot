@@ -47,6 +47,7 @@ class AppContext:
         """Kraken's public side: names and pairs from the catalog, prices live."""
         return Market(self.catalog, KrakenClient(self.kraken_http, self.limiter))
 
-    def kraken_for(self, credentials: Credentials) -> KrakenClient:
-        """A client for one request. The limiter is shared, so pacing still counts per key."""
-        return KrakenClient(self.kraken_http, self.limiter, credentials=credentials)
+    def kraken_for(self, user_id: uuid.UUID, credentials: Credentials) -> KrakenClient:
+        """A client for one request. The limiter is shared and counts per user: one entry
+        per user, however many keys they try, as the database holds one."""
+        return KrakenClient(self.kraken_http, self.limiter, credentials=credentials, bucket=str(user_id))

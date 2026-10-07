@@ -106,10 +106,15 @@ class KrakenClient:
         http: httpx.Client,
         limiter: KeyLimiter,
         credentials: Credentials | None = None,
+        *,
+        bucket: str | None = None,
     ) -> None:
         self._http = http
         self._limiter = limiter
         self._credentials = credentials
+        # What the limiter counts this identity under: the user, when there is one, so the
+        # limiter holds one entry per user however many keys they try.
+        self._bucket = bucket
 
     # ----- the two ways in -------------------------------------------------
 
@@ -128,8 +133,9 @@ class KrakenClient:
         if credentials is None:
             raise MissingCredentials(endpoint)
         path = f"/0/private/{endpoint}"
-        self._limiter.wait_turn(credentials.api_key)
-        nonce = self._limiter.next_nonce(credentials.api_key)
+        bucket = self._bucket or credentials.api_key
+        self._limiter.wait_turn(bucket)
+        nonce = self._limiter.next_nonce(bucket)
         body = encode_body({"nonce": nonce, **dict(payload or {})})
         try:
             signature = sign(path, nonce, body, credentials.api_secret)
