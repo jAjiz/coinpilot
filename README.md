@@ -1,9 +1,9 @@
 # CoinPilot
 
-> **Status:** project 1 complete. The platform runs in production: free cash is invested,
-> and drift is looked for, on each user's cadence; a rebalance is proposed, or executed
-> when the user turned automatic rebalancing on. Everything also runs on request through
-> the REST API. The application that consumes it is project 2.
+> **Status:** project 1 built; going into production. Free cash is invested, and drift is
+> looked for, on each user's cadence; a rebalance is proposed, or executed when the user
+> turned automatic rebalancing on. Everything also runs on request through the REST API.
+> The application that consumes it is project 2.
 
 A multi-tenant service that keeps a crypto portfolio at the target allocation its owner
 declared, on Kraken. It does two things, and they matter equally:
