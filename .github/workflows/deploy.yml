@@ -34,8 +34,8 @@ jobs:
     env:
       ACTION: ${{ inputs.action }}
       TAG: ${{ inputs.tag }}
-      VM: ${{ vars.GCP_VM }}
-      ZONE: ${{ vars.GCP_ZONE }}
+      VM: ${{ secrets.GCP_VM }}
+      ZONE: ${{ secrets.GCP_ZONE }}
 
     steps:
       - name: Check the tag
@@ -50,13 +50,13 @@ jobs:
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v3.0.0
         with:
-          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
-          service_account: ${{ vars.GCP_DEPLOY_SA }}
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SA }}
 
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v3.0.1
         with:
-          project_id: ${{ vars.GCP_PROJECT }}
+          project_id: ${{ secrets.GCP_PROJECT }}
 
       - name: Copy the deploy files
         run: |

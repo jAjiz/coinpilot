@@ -9,16 +9,24 @@ shell:
 
 ```bash
 PROJECT=...   # the Google Cloud project id
-REGION=...    # e.g. europe-southwest1
-ZONE=...      # e.g. europe-southwest1-a
+REGION=...    # us-east1, us-central1 or us-west1: the free tier's regions
+ZONE=...      # e.g. us-east1-b
 VM=coinpilot
 ```
 
 ## 1. What runs where
 
-One `e2-small` Debian 13 VM in Google Cloud. Docker runs `postgres` and `platform` from
-`/opt/coinpilot/compose.yml`. No port is open to the internet: SSH arrives through IAP,
-and the API listens on the VM's loopback. Images are `ghcr.io/jajiz/coinpilot:<sha>`.
+One `e2-micro` Ubuntu 26.04 LTS minimal VM in Google Cloud, inside the free tier: 1 GB of
+memory plus a 2 GB swap file, a 30 GB standard disk, standard network tier. Docker runs
+`postgres` and `platform` from `/opt/coinpilot/compose.yml`. No port is open to the
+internet: SSH arrives through IAP, and the API listens on the VM's loopback. Images are
+`ghcr.io/jajiz/coinpilot:<sha>`.
+
+The swap is what makes 1 GB enough: during a deploy two images are on disk, a dump is
+written and a migration runs beside PostgreSQL and the platform. If the VM is short of
+memory anyway (`free -h`, the platform restarting in `./compose.sh ps`), resize it to
+`e2-small`: stop it, `gcloud compute instances set-machine-type "$VM" --zone "$ZONE"
+--machine-type e2-small`, start it. That leaves the free tier.
 
 Files in `/opt/coinpilot`:
 
@@ -37,14 +45,15 @@ gcloud config set project "$PROJECT"
 gcloud services enable compute.googleapis.com iap.googleapis.com iamcredentials.googleapis.com sts.googleapis.com
 
 # A static address, so the Kraken key can be restricted to it. Skip if it is reserved
-# already; it must be in $REGION.
-gcloud compute addresses create "$VM" --region "$REGION"
+# already; it must be in $REGION and on the same network tier as the VM.
+gcloud compute addresses create "$VM" --region "$REGION" --network-tier STANDARD
 
+# e2-micro, a 30 GB pd-standard disk and the standard tier are what the free tier covers.
 gcloud compute instances create "$VM" --zone "$ZONE" \
-  --machine-type e2-small \
-  --image-family debian-13 --image-project debian-cloud \
-  --boot-disk-size 20GB --boot-disk-type pd-balanced \
-  --address "$VM" \
+  --machine-type e2-micro \
+  --image-family ubuntu-minimal-2604-lts-amd64 --image-project ubuntu-os-cloud \
+  --boot-disk-size 30GB --boot-disk-type pd-standard \
+  --address "$VM" --network-tier STANDARD \
   --metadata enable-oslogin=TRUE \
   --shielded-secure-boot --shielded-vtpm --shielded-integrity-monitoring \
   --no-service-account --no-scopes
@@ -53,7 +62,9 @@ gcloud compute instances create "$VM" --zone "$ZONE" \
 gcloud compute firewall-rules delete default-allow-ssh default-allow-rdp --quiet
 gcloud compute firewall-rules create allow-ssh-from-iap --network default \
   --direction INGRESS --allow tcp:22 --source-ranges 35.235.240.0/20
-gcloud compute firewall-rules list   # expect: allow-ssh-from-iap, default-allow-icmp, default-allow-internal
+# Expect no INGRESS rule but this one and default-allow-internal (and default-allow-icmp,
+# if it exists). Restricting default-allow-ssh to the same range is equivalent.
+gcloud compute firewall-rules list
 
 # 14 daily snapshots of the disk, kept off the VM.
 gcloud compute resource-policies create snapshot-schedule "$VM-daily" --region "$REGION" \
@@ -61,7 +72,9 @@ gcloud compute resource-policies create snapshot-schedule "$VM-daily" --region "
   --on-source-disk-delete keep-auto-snapshots
 gcloud compute disks add-resource-policies "$VM" --zone "$ZONE" --resource-policies "$VM-daily"
 
-# Then, on the VM:
+# Then, on the VM: a 2 GB swap file that survives a reboot, and the bootstrap.
+gcloud compute ssh "$VM" --zone "$ZONE" --tunnel-through-iap --command \
+  "sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile && echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab"
 gcloud compute scp deploy/bootstrap.sh "$VM:~/" --zone "$ZONE" --tunnel-through-iap
 gcloud compute ssh "$VM" --zone "$ZONE" --tunnel-through-iap --command "sudo bash ~/bootstrap.sh"
 ```
@@ -88,9 +101,11 @@ gcloud compute instances add-iam-policy-binding "$VM" --zone "$ZONE" --member "s
 ```
 
 In GitHub: Settings → Environments → New environment `production`; "Deployment
-branches": `main` only. Add the variables `GCP_PROJECT`, `GCP_ZONE`, `GCP_VM`,
+branches": `main` only. Add the environment secrets `GCP_PROJECT`, `GCP_ZONE`, `GCP_VM`,
 `GCP_DEPLOY_SA` (`$SA`) and `GCP_WIF_PROVIDER`:
 `projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/github/providers/coinpilot`.
+None of them grants access on its own, but as secrets they are masked in the workflow's
+log, where `gcloud` would otherwise print the project, the zone and the VM.
 
 After the first Release run: GitHub → Packages → `coinpilot` → Package settings →
 Change visibility → Public. Check from any machine, with no login:
