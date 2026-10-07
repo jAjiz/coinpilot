@@ -1,0 +1,55 @@
+# Production: what runs on the host (runbook: docs/operations.md). compose.sh supplies
+# .env, which holds the secrets and never enters this repository, and release.env, which
+# names the release (TAG) that deploy.sh last started.
+name: coinpilot
+
+x-database-url: &database-url postgresql+psycopg://coinpilot:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is not set}@postgres:5432/coinpilot
+
+services:
+  postgres:
+    image: postgres:18.6
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: coinpilot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is not set}
+      POSTGRES_DB: coinpilot
+    volumes:
+      # 18+ mounts the parent, not data/ (see docker-compose.dev.yml).
+      - pgdata:/var/lib/postgresql
+    # No port: only the containers of this project reach it.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U coinpilot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Run by deploy.sh with the new image before the platform is recreated.
+  migrate:
+    image: ghcr.io/jajiz/coinpilot:${TAG:-none}
+    profiles: [tools]
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      DATABASE_URL: *database-url
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  platform:
+    image: ghcr.io/jajiz/coinpilot:${TAG:-none}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: *database-url
+    # Loopback only: reached through an SSH tunnel over IAP, never from the internet.
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Stopping waits for open requests (60 s, the Dockerfile) and then for a scheduler tick
+    # under way, which can be between an order and its answer (spec §9.2). Docker's default
+    # of 10 s would kill it there.
+    stop_grace_period: 180s
+
+volumes:
+  pgdata:

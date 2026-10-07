@@ -74,3 +74,44 @@ jobs:
 
       - name: Imports the application and the scripts
         run: docker run --rm ghcr.io/jajiz/coinpilot:ci-1 python -c "import api.main, scripts.rotate_master_key"
+
+      - name: shellcheck
+        run: shellcheck deploy/*.sh
+
+      - name: Deploy, deploy again, roll back
+        run: |
+          home="$RUNNER_TEMP/coinpilot"
+          mkdir -p "$home"
+          cp deploy/compose.yml deploy/compose.sh deploy/deploy.sh "$home/"
+          # Throwaway values, generated here and gone with the runner.
+          {
+            echo "POSTGRES_PASSWORD=$(openssl rand -hex 16)"
+            echo "JWT_SECRET=$(openssl rand -hex 32)"
+            echo "CREDENTIAL_KEYS=1:$(openssl rand -base64 32)"
+            echo "CREDENTIAL_KEY_VERSION=1"
+            echo "GOOGLE_CLIENT_ID=ci"
+            echo "GOOGLE_CLIENT_SECRET=ci"
+            echo "GOOGLE_REDIRECT_URI=http://localhost:8000/auth/callback/google"
+          } > "$home/.env"
+          docker tag ghcr.io/jajiz/coinpilot:ci-1 ghcr.io/jajiz/coinpilot:ci-2
+
+          "$home/deploy.sh" deploy ci-1
+          curl -fsS http://127.0.0.1:8000/health
+          "$home/deploy.sh" deploy ci-2
+          test "$(tail -n 1 "$home/releases")" = ci-2
+          "$home/deploy.sh" rollback
+          test "$(tail -n 1 "$home/releases")" = ci-1
+          curl -fsS http://127.0.0.1:8000/health
+          test "$(ls "$home"/backups/*.dump | wc -l)" = 2
+          "$home/compose.sh" run --rm platform python scripts/rotate_master_key.py --check
+
+          # A deploy that never became healthy leaves release.env ahead of releases. The
+          # rollback must return to the last healthy release (ci-1), not the one before (ci-2).
+          echo "TAG=never-healthy" > "$home/release.env"
+          "$home/deploy.sh" rollback
+          test "$(tail -n 1 "$home/releases")" = ci-1
+          curl -fsS http://127.0.0.1:8000/health
+
+      - name: The platform's log, when something failed
+        if: failure()
+        run: docker compose -p coinpilot logs --tail 200
