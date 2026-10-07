@@ -1,0 +1,73 @@
+name: Deploy
+
+# Run by hand: Actions → Deploy → Run workflow. A deploy names the full commit SHA of an
+# image the Release workflow built; a rollback names nothing and starts the release
+# before the current one (runbook: docs/operations.md).
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: deploy or rollback
+        type: choice
+        options: [deploy, rollback]
+        default: deploy
+      tag:
+        description: Full commit SHA to deploy (ignored by a rollback)
+        type: string
+        required: false
+
+# One at a time, and never cancelled halfway.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    name: ${{ inputs.action }}
+    runs-on: ubuntu-latest
+    environment: production
+
+    env:
+      ACTION: ${{ inputs.action }}
+      TAG: ${{ inputs.tag }}
+      VM: ${{ vars.GCP_VM }}
+      ZONE: ${{ vars.GCP_ZONE }}
+
+    steps:
+      - name: Check the tag
+        if: inputs.action == 'deploy'
+        run: |
+          [[ "$TAG" =~ ^[0-9a-f]{40}$ ]] || { echo "tag must be a full commit SHA"; exit 1; }
+          docker manifest inspect "ghcr.io/jajiz/coinpilot:$TAG" > /dev/null
+
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v3.0.1
+        with:
+          project_id: ${{ vars.GCP_PROJECT }}
+
+      - name: Copy the deploy files
+        run: |
+          ssh_flags=(--zone "$ZONE" --tunnel-through-iap --ssh-key-expire-after=30m --quiet)
+          gcloud compute ssh "$VM" "${ssh_flags[@]}" --command "mkdir -p ~/coinpilot-deploy"
+          gcloud compute scp deploy/compose.yml deploy/compose.sh deploy/deploy.sh \
+            "$VM:~/coinpilot-deploy/" --zone "$ZONE" --tunnel-through-iap --quiet
+          gcloud compute ssh "$VM" "${ssh_flags[@]}" --command \
+            "sudo install -m 0644 ~/coinpilot-deploy/compose.yml /opt/coinpilot/ && sudo install -m 0755 ~/coinpilot-deploy/compose.sh ~/coinpilot-deploy/deploy.sh /opt/coinpilot/"
+
+      - name: Run it on the host
+        run: |
+          if [[ "$ACTION" == deploy ]]; then command="sudo /opt/coinpilot/deploy.sh deploy $TAG"; else command="sudo /opt/coinpilot/deploy.sh rollback"; fi
+          gcloud compute ssh "$VM" --zone "$ZONE" --tunnel-through-iap --ssh-key-expire-after=30m --quiet --command "$command"
