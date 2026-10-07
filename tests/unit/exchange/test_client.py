@@ -486,3 +486,43 @@ def test_a_sell_is_a_volume_of_the_asset_and_pays_its_fee_in_fiat():
     assert seen["form"]["type"] == ["sell"]
     assert seen["form"]["volume"] == ["0.004"]
     assert seen["form"]["oflags"] == ["fciq"]
+
+
+OTHER_CREDENTIALS = Credentials(api_key="ANOTHER-PUBLIC-KEY", api_secret=CREDENTIALS.api_secret)
+
+
+class RecordingLimiter(KeyLimiter):
+    """Paces nothing, and remembers the bucket of every call."""
+
+    def __init__(self) -> None:
+        super().__init__(0.0)
+        self.buckets: list[str] = []
+
+    def wait_turn(self, bucket: str) -> None:
+        self.buckets.append(bucket)
+
+
+def _balance_answer(request):
+    return httpx.Response(200, json={"error": [], "result": {"ZEUR": "1"}})
+
+
+def _recording_client(limiter, credentials, bucket=None):
+    http = httpx.Client(base_url="https://api.kraken.com", transport=httpx.MockTransport(_balance_answer))
+    return KrakenClient(http, limiter, credentials=credentials, bucket=bucket)
+
+
+def test_a_private_call_counts_under_the_bucket_it_was_given():
+    limiter = RecordingLimiter()
+
+    _recording_client(limiter, CREDENTIALS, bucket="user-1")._call_private("Balance")
+    _recording_client(limiter, OTHER_CREDENTIALS, bucket="user-1")._call_private("Balance")
+
+    assert limiter.buckets == ["user-1", "user-1"]
+
+
+def test_with_no_bucket_a_private_call_counts_under_its_key():
+    limiter = RecordingLimiter()
+
+    _recording_client(limiter, CREDENTIALS)._call_private("Balance")
+
+    assert limiter.buckets == ["THE-PUBLIC-KEY"]

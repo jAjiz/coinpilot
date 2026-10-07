@@ -1,6 +1,6 @@
 # CoinPilot — Platform Design
 
-**Date:** 2026-09-17 · **Status:** approved; phases 1 to 4 implemented · **Scope:** Project 1 of 2
+**Date:** 2026-09-17 · **Status:** approved; phases 1 to 8 implemented · **Scope:** Project 1 of 2
 
 ---
 
@@ -640,18 +640,33 @@ No integration test places a real order. Against Kraken, `validate=true` only.
 
 ## 13. Deployment and operations
 
-The same VM and the same pipeline shape: image to GHCR, rollout over SSH. Two containers
-instead of four.
+One Google Cloud VM, `e2-small`, Debian 13, running two containers from one compose
+file: `postgres` and `platform`. No port is open to the internet. SSH arrives only
+through Identity-Aware Proxy, with OS Login, and the API is published on the VM's
+loopback; the operator reaches it through an SSH tunnel, so the OAuth callback stays
+`http://localhost:8000`. How the API is exposed beyond that is project 2 (§16). The
+runbook is [`docs/operations.md`](../operations.md).
 
-**The master encryption key** lives in the environment. If it is lost, every stored
-credential is unrecoverable. A backup procedure and a rotation procedure are part of the
-initial documentation — rotation is what the key-version column exists for.
+**Releases.** Every commit on `main` whose CI passed is built into
+`ghcr.io/jajiz/coinpilot:<sha>`. Tags never move. A deploy is dispatched by hand: the
+workflow authenticates to Google Cloud with Workload Identity Federation, so no key file
+exists, and runs `deploy.sh` on the VM. It dumps the database, migrates with the new
+image, recreates the platform and waits for its health check. A rollback starts the
+previous image and runs no migration, which is safe because **every migration leaves the
+previous release working**: additive only.
 
-**OAuth client secrets** follow the same path.
+**Stopping waits for the tick.** The platform's stop grace period is longer than a tick,
+so a deploy never cuts an evaluation between an order and its answer (§9.2).
 
-**Host hardening is now a prerequisite.** Port 22 is open to the internet and under
-constant brute force. For single-user operation that was an annoyance. With third-party
-credentials inside, it must be closed before the service is opened to anyone else.
+**The master encryption key** lives in the VM's `.env` and in the operator's password
+manager, outside Google Cloud. If it is lost, every stored credential is unrecoverable.
+Rotation re-seals every record under the new key, one transaction and one row lock each,
+and only then is the old key removed.
+
+**Backups.** A dump before every deploy, on the VM, and 14 daily disk snapshots off it.
+
+**Logs** stay in Docker, bounded per container. The failure-streak warning is read there
+until project 2 brings notifications.
 
 ## 14. Design choices
 
@@ -745,6 +760,9 @@ Non-obvious decisions a reviewer would otherwise question.
 - **Slippage is unmeasured.** Market orders fill at whatever the book offers.
 - **Custody of third-party credentials carries a legal posture** different from operating
   one's own account. To be reviewed before the service is opened to other people.
+- **Nothing watches the service.** Docker restarts a platform that dies, but no uptime
+  check or notification tells anyone that it stopped, or that a user's operations keep
+  failing. The log holds both. Project 2 brings notifications.
 
 ## 16. Deferred to project 2
 

@@ -1961,3 +1961,8 @@ repository.
 
 | Where | What changed | Why |
 |---|---|---|
+| Task 1, `tests/unit/core/test_logs.py` | The `DETAIL` error text is two adjacent string literals | One literal is 112 characters after `ruff format`, over the 110 limit (E501); `ruff format` does not split strings |
+| Task 6, `deploy.yml` | `google-github-actions/auth@v3.0.0`, `setup-gcloud@v3.0.1` | The latest full release tags on 2026-10-07. GitHub's "latest" for `auth` is the moving `v3` tag, so the full one is pinned |
+| Task 7, `deploy/env.production.example` | `JWT_SECRET=` comes after `JWT_TTL_MINUTES` and `REFRESH_TTL_DAYS`, under its comment | gitleaks' `generic-api-key` reads an empty `JWT_SECRET=` across the newline into `JWT_TTL_MINUTES=15` and fails the hook. A comment line after it stops the match, as in `.env.example` |
+| Task 7, `docs/operations.md` §2 | `--address "$VM"` on a line of its own in `instances create` | The plan's block had it trailing the disk flags, followed by a line holding only `\` |
+| Task 5, verification | `deploy.sh` was also run locally, with `COMPOSE_PROJECT_NAME=coinpilot-localtest` | The dev compose uses project `coinpilot` and volume `pgdata` too; the override keeps the development database out of it. Same steps as the CI job; they passed |

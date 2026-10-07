@@ -48,6 +48,11 @@ class CredentialCipher:
         self._keys = dict(keys)
         self._active = active_version
 
+    @property
+    def active_version(self) -> int:
+        """The version `seal` uses."""
+        return self._active
+
     def seal(self, user_id: uuid.UUID, credentials: Credentials) -> Sealed:
         payload = json.dumps({"key": credentials.api_key, "secret": credentials.api_secret}).encode("utf-8")
         # Random, never counted. A counter would have to survive restarts and replicas to

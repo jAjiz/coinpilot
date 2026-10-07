@@ -1,9 +1,9 @@
 # CoinPilot
 
-> **Status: in development.** Phase 7 of 8: free cash is invested, and drift is looked
-> for, on each user's cadence. A rebalance found by the scheduler is proposed, or
-> executed when the user turned automatic rebalancing on. Everything also runs on
-> request: `POST /invest`, `POST /rebalance`, `POST /proposal/approve`.
+> **Status:** project 1 built; going into production. Free cash is invested, and drift is
+> looked for, on each user's cadence; a rebalance is proposed, or executed when the user
+> turned automatic rebalancing on. Everything also runs on request through the REST API.
+> The application that consumes it is project 2.
 
 A multi-tenant service that keeps a crypto portfolio at the target allocation its owner
 declared, on Kraken. It does two things, and they matter equally:
@@ -52,6 +52,12 @@ PYTHONPATH=. uvicorn --factory api.main:build --port 8000
 
 Sign in at `http://localhost:8000/auth/login/google`. The API is described at
 `http://localhost:8000/docs`.
+
+## Production
+
+One Google Cloud VM with no port open to the internet, two containers, and a deploy that
+is dispatched by hand. Provisioning, secrets, deploy, rollback, master-key rotation and
+backups are in [`docs/operations.md`](docs/operations.md).
 
 ## Security
 

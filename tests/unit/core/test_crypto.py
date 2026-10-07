@@ -94,3 +94,7 @@ def test_a_failure_message_carries_no_part_of_the_credential():
 
     assert "THE-SECRET-VALUE" not in str(caught.value)
     assert "THE-PUBLIC-KEY" not in str(caught.value)
+
+
+def test_the_cipher_says_which_version_it_seals_with():
+    assert _cipher({1: KEY_1, 2: KEY_2}, active=2).active_version == 2

@@ -51,7 +51,7 @@ class ExecutionContext(Protocol):
 
     def public_kraken(self): ...
 
-    def kraken_for(self, credentials: Credentials): ...
+    def kraken_for(self, user_id: uuid.UUID, credentials: Credentials): ...
 
 
 class EvaluationBusy(Exception):
@@ -212,7 +212,7 @@ def invest(
     """
     if preview:
         account = _load(context, user_id, allow_sells=False)
-        private = context.kraken_for(context.cipher.unseal(user_id, account.sealed))
+        private = context.kraken_for(user_id, context.cipher.unseal(user_id, account.sealed))
         return _preview(context, user_id, account, private)
     return evaluate(
         context,
@@ -261,7 +261,7 @@ def evaluate(
     with `operation` and `trigger`.
     """
     account = _load(context, user_id, allow_sells=allow_sells)
-    private = context.kraken_for(context.cipher.unseal(user_id, account.sealed))
+    private = context.kraken_for(user_id, context.cipher.unseal(user_id, account.sealed))
     with context.user_lock(user_id) as taken:
         if not taken:
             raise EvaluationBusy(str(user_id))

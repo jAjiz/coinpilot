@@ -1,9 +1,11 @@
 import base64
+import dataclasses
 import logging
 
 from api.app import create_app
 from core.crypto import Sealed
 from core.db.users import get_credentials
+from exchange.limits import KeyLimiter
 from exchange.types import Credentials
 
 # Built at run time, so no literal that looks like a secret sits in the repository.
@@ -179,3 +181,25 @@ def test_no_response_model_has_a_field_for_a_credential(app_context):
         model = getattr(route, "response_model", None)
         fields = getattr(model, "model_fields", {})
         assert not any("secret" in name or name == "api_key" for name in fields), route.path
+
+
+class RecordingLimiter(KeyLimiter):
+    """Paces nothing, and remembers the bucket of every call."""
+
+    def __init__(self) -> None:
+        super().__init__(0.0)
+        self.buckets: list[str] = []
+
+    def wait_turn(self, bucket: str) -> None:
+        self.buckets.append(bucket)
+
+
+def test_the_keys_a_user_tries_are_paced_as_one(app_context, make_user):
+    limiter = RecordingLimiter()
+    context = dataclasses.replace(app_context, limiter=limiter)
+    user = make_user()
+
+    context.kraken_for(user.id, Credentials("FIRST-KEY", "c2VjcmV0"))._call_private("Balance")
+    context.kraken_for(user.id, Credentials("SECOND-KEY", "c2VjcmV0"))._call_private("Balance")
+
+    assert limiter.buckets == [str(user.id), str(user.id)]

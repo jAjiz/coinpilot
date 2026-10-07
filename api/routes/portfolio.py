@@ -58,7 +58,7 @@ def refresh(user: CurrentUser, session: Db, context: Ctx) -> PortfolioOut:
     try:
         view = read_portfolio(
             context.public_kraken(),
-            context.kraken_for(credentials),
+            context.kraken_for(user.id, credentials),
             settings.fiat,
             db.list_assets(session, user.id),
         )

@@ -19,7 +19,7 @@ def register(body: CredentialsIn, user: CurrentUser, session: Db, context: Ctx) 
         api_key=body.api_key.get_secret_value(),
         api_secret=body.api_secret.get_secret_value(),
     )
-    result = validate_key(context.kraken_for(credentials))
+    result = validate_key(context.kraken_for(user.id, credentials))
     if result.rejection is KeyRejection.UNREACHABLE:
         raise HTTPException(503, "kraken could not be reached; the key was not stored")
     if result.rejection is KeyRejection.LOCKED_OUT:
