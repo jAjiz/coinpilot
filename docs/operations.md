@@ -88,9 +88,11 @@ gcloud compute instances add-iam-policy-binding "$VM" --zone "$ZONE" --member "s
 ```
 
 In GitHub: Settings → Environments → New environment `production`; "Deployment
-branches": `main` only. Add the variables `GCP_PROJECT`, `GCP_ZONE`, `GCP_VM`,
+branches": `main` only. Add the environment secrets `GCP_PROJECT`, `GCP_ZONE`, `GCP_VM`,
 `GCP_DEPLOY_SA` (`$SA`) and `GCP_WIF_PROVIDER`:
 `projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/github/providers/coinpilot`.
+None of them grants access on its own, but as secrets they are masked in the workflow's
+log, where `gcloud` would otherwise print the project, the zone and the VM.
 
 After the first Release run: GitHub → Packages → `coinpilot` → Package settings →
 Change visibility → Public. Check from any machine, with no login:
