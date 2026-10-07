@@ -640,7 +640,7 @@ No integration test places a real order. Against Kraken, `validate=true` only.
 
 ## 13. Deployment and operations
 
-One Google Cloud VM, `e2-small`, Debian 13, running two containers from one compose
+One Google Cloud VM, `e2-small`, Ubuntu 26.04 LTS minimal, running two containers from one compose
 file: `postgres` and `platform`. No port is open to the internet. SSH arrives only
 through Identity-Aware Proxy, with OS Login, and the API is published on the VM's
 loopback; the operator reaches it through an SSH tunnel, so the OAuth callback stays

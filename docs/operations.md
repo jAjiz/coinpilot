@@ -16,7 +16,7 @@ VM=coinpilot
 
 ## 1. What runs where
 
-One `e2-small` Debian 13 VM in Google Cloud. Docker runs `postgres` and `platform` from
+One `e2-small` Ubuntu 26.04 LTS minimal VM in Google Cloud. Docker runs `postgres` and `platform` from
 `/opt/coinpilot/compose.yml`. No port is open to the internet: SSH arrives through IAP,
 and the API listens on the VM's loopback. Images are `ghcr.io/jajiz/coinpilot:<sha>`.
 
@@ -42,7 +42,7 @@ gcloud compute addresses create "$VM" --region "$REGION"
 
 gcloud compute instances create "$VM" --zone "$ZONE" \
   --machine-type e2-small \
-  --image-family debian-13 --image-project debian-cloud \
+  --image-family ubuntu-minimal-2604-lts-amd64 --image-project ubuntu-os-cloud \
   --boot-disk-size 20GB --boot-disk-type pd-balanced \
   --address "$VM" \
   --metadata enable-oslogin=TRUE \
