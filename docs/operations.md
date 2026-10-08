@@ -75,8 +75,10 @@ gcloud compute disks add-resource-policies "$VM" --zone "$ZONE" --resource-polic
 # Then, on the VM: a 2 GB swap file that survives a reboot, and the bootstrap.
 gcloud compute ssh "$VM" --zone "$ZONE" --tunnel-through-iap --command \
   "sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile && echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab"
-gcloud compute scp deploy/bootstrap.sh "$VM:~/" --zone "$ZONE" --tunnel-through-iap
-gcloud compute ssh "$VM" --zone "$ZONE" --tunnel-through-iap --command "sudo bash ~/bootstrap.sh"
+# A remote path without a directory lands in the home directory. Not "~/": on Windows,
+# gcloud copies with PuTTY's pscp, which does not expand it.
+gcloud compute scp deploy/bootstrap.sh "$VM:bootstrap.sh" --zone "$ZONE" --tunnel-through-iap
+gcloud compute ssh "$VM" --zone "$ZONE" --tunnel-through-iap --command "sudo bash bootstrap.sh"
 ```
 
 The pipeline's identity (Workload Identity Federation; no key file exists):
