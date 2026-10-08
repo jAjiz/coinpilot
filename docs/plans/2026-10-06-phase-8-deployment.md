@@ -1969,3 +1969,21 @@ repository.
 | The VM; runbook §1 and §2, spec §13 | `e2-micro` with a 2 GB swap file, a 30 GB `pd-standard` disk and the standard network tier, not `e2-small` with 20 GB `pd-balanced` | The user's choice: Google's free tier. The swap covers a deploy's peak; the runbook says how to resize to `e2-small` if memory runs short |
 | Task 6, `deploy.yml`; runbook §2 | The five `GCP_*` values are environment secrets (`secrets.GCP_*`), not variables | The user's choice. Secrets are masked in the Actions log, where `gcloud` prints the project, zone and VM |
 | Task 5, verification | `deploy.sh` was also run locally, with `COMPOSE_PROJECT_NAME=coinpilot-localtest` | The dev compose uses project `coinpilot` and volume `pgdata` too; the override keeps the development database out of it. Same steps as the CI job; they passed |
+| Runbook §2, copying to the VM | `"$VM:bootstrap.sh"`, not `"$VM:~/"` (PR #29) | On Windows `gcloud compute scp` runs PuTTY's `pscp`, which does not expand `~/` |
+| Provisioning, `.env` | The first `CREDENTIAL_KEYS` was printed while checking for empty values with `grep '=$'`, which matches base64's padding. It was replaced before any credential was stored; the runbook §3 now gives `grep -c '^[A-Z_]*=$'` | No record was sealed with it, so replacing it needed no rotation |
+
+## What the manual check showed (2026-10-07 and 2026-10-08)
+
+Production runs `7bcec93` on `my-vps`, with one user (the operator, signed in) and no
+credential. Steps 3 (Kraken), 4 and 7 wait for project 2: the operator registers the key
+through the UI, so the first onboarding is also its test.
+
+| Step | Result |
+|---|---|
+| 1. Release | Release built `519d490` and every later merge. The package pulls with no login (HTTP 200 on an anonymous manifest request). |
+| 2. Provision | From outside Google Cloud, with no VPN: 22, 80, 443, 3389, 5432 and 8000 time out, ping gets no answer. Inside, only `sshd` listens beyond loopback. Behind the corporate VPN, 80 and 443 look open for any address: its proxy answers, not the VM. `gcloud compute ssh --tunnel-through-iap` works, with OS Login and `sudo`. |
+| 3. First deploy | `8cf8148`: the dump, then the five migrations from an empty database, then healthy in 28 s. Sign-in through the tunnel created the user; `GET /auth/me` answers. Kraken, `/portfolio` and `/sessions`: **pending**, with project 2. |
+| 4. Rotation | **Pending**: with no credential stored it would prove nothing. |
+| 5. Deploy and roll back | `7bcec93` deployed (dump, no migration to apply), rolled back to `8cf8148` (no dump and no `alembic` line in the log), deployed again. `releases` holds the four starts in order and `backups/` three dumps; PostgreSQL ran throughout. Memory after three recreations: 474 MiB used of 952, 71 MiB of swap. |
+| 6. Reboot | A full stop and start of the VM, not `sudo reboot`: Claude's session cannot open the IAP tunnel. Both containers came back healthy on their own and the swap was on. The stop took 74 s; Compute Engine allows about 90 s, less than `stop_grace_period`, which spec §13 now says. |
+| 7. Close the doors | **Pending**, with step 3: restrict the key to `my-vps`'s address, delete it from the development database. |
