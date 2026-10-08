@@ -656,7 +656,10 @@ previous image and runs no migration, which is safe because **every migration le
 previous release working**: additive only.
 
 **Stopping waits for the tick.** The platform's stop grace period is longer than a tick,
-so a deploy never cuts an evaluation between an order and its answer (§9.2).
+so a deploy never cuts an evaluation between an order and its answer (§9.2). That holds
+when Docker stops the platform. Stopping the VM is bounded by Compute Engine's shutdown
+period instead, about 90 s, so a tick under way can be cut there: the operator stops the
+VM only when nothing is due.
 
 **The master encryption key** lives in the VM's `.env` and in the operator's password
 manager, outside Google Cloud. If it is lost, every stored credential is unrecoverable.

@@ -124,6 +124,10 @@ Copy `CREDENTIAL_KEYS` into your password manager before any credential is store
 is lost, every stored Kraken key is unreadable, and the only remedy is for each user to
 register theirs again.
 
+To check that no value was left empty without printing any, count the lines that are a
+name and nothing else: `sudo grep -c '^[A-Z_]*=$' /opt/coinpilot/.env` must say `0`. Not
+`grep '=$'`: a base64 key ends in `=`, so that prints the master key.
+
 ## 4. Reaching the API
 
 ```bash
@@ -133,6 +137,10 @@ gcloud compute ssh "$VM" --zone "$ZONE" --tunnel-through-iap -- -N -L 8000:local
 Leave it open; the API is at `http://localhost:8000` (`/docs`, and sign in at
 `/auth/login/google`). Stop the local development API first: it would hold port 8000,
 and two schedulers on the same Kraken account would both invest.
+
+Every IAP connection (`ssh`, `scp`, this tunnel) needs a network that does not inspect
+TLS. Behind a corporate VPN it fails with `CERTIFICATE_VERIFY_FAILED` or "Remote side
+unexpectedly closed network connection": disconnect the VPN.
 
 ## 5. Deploy
 
