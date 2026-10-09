@@ -66,12 +66,6 @@ gcloud compute firewall-rules create allow-ssh-from-iap --network default \
 # if it exists). Restricting default-allow-ssh to the same range is equivalent.
 gcloud compute firewall-rules list
 
-# 14 daily snapshots of the disk, kept off the VM.
-gcloud compute resource-policies create snapshot-schedule "$VM-daily" --region "$REGION" \
-  --daily-schedule --start-time 03:00 --max-retention-days 14 \
-  --on-source-disk-delete keep-auto-snapshots
-gcloud compute disks add-resource-policies "$VM" --zone "$ZONE" --resource-policies "$VM-daily"
-
 # Then, on the VM: a 2 GB swap file that survives a reboot, and the bootstrap.
 gcloud compute ssh "$VM" --zone "$ZONE" --tunnel-through-iap --command \
   "sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile && echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab"
@@ -191,18 +185,15 @@ Rotate when the key may have been exposed, and when someone who knew it no longe
 6. Remove `1:<old>,` from `CREDENTIAL_KEYS`, and recreate the platform again as in 3.
 7. `GET /portfolio` through the tunnel reads your balance: the record opens with the new
    key alone. Only now delete the old key from your password manager. Dumps taken before
-   step 4 still need it; keep it while `backups/` and the snapshots hold one.
+   step 4 still need it; keep it while a dump or a copy of the disk holds one.
 
 ## 8. Backups and restore
 
-Each deploy leaves a dump in `/opt/coinpilot/backups/` (newest ten). The disk is
-snapshotted daily, 14 kept.
+Each deploy leaves a dump in `/opt/coinpilot/backups/` (newest ten).
 
 - To take a dump by hand:
   `./compose.sh exec -T postgres pg_dump -U coinpilot -Fc coinpilot > backups/manual.dump`.
 - To restore one, see section 6.
-- To restore a whole snapshot, create a disk from it and a new VM on it (Compute Engine →
-  Snapshots → Create disk).
 
 ## 9. Logs
 
