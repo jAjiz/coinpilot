@@ -40,7 +40,7 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: *database-url
-    # Loopback only: reached through an SSH tunnel over IAP, never from the internet.
+    # Loopback only: never published to the internet directly (docs/operations.md, section 4).
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:

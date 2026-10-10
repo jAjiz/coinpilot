@@ -55,9 +55,9 @@ Sign in at `http://localhost:8000/auth/login/google`. The API is described at
 
 ## Production
 
-One Google Cloud VM with no port open to the internet, two containers, and a deploy that
-is dispatched by hand. Provisioning, secrets, deploy, rollback, master-key rotation and
-backups are in [`docs/operations.md`](docs/operations.md).
+One Linux host with Docker, two containers, the API bound to loopback, and a deploy
+that is dispatched by hand. Requirements, secrets, how to reach the API, deploy,
+rollback, master-key rotation and backups are in [`docs/operations.md`](docs/operations.md).
 
 ## Security
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Prepares a fresh Ubuntu 26.04 minimal VM for the platform. Run once, as root:
+# Prepares a fresh Ubuntu or Debian host for the platform. Run once, as root:
 #
 #   sudo bash bootstrap.sh
 #
