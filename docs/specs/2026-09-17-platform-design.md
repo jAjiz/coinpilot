@@ -640,33 +640,33 @@ No integration test places a real order. Against Kraken, `validate=true` only.
 
 ## 13. Deployment and operations
 
-One Google Cloud VM, `e2-micro` with 2 GB of swap (the free tier), Ubuntu 26.04 LTS minimal, running two containers from one compose
-file: `postgres` and `platform`. No port is open to the internet. SSH arrives only
-through Identity-Aware Proxy, with OS Login, and the API is published on the VM's
-loopback; the operator reaches it through an SSH tunnel, so the OAuth callback stays
-`http://localhost:8000`. How the API is exposed beyond that is project 2 (§16). The
-runbook is [`docs/operations.md`](../operations.md).
+One Linux host with Docker, running two containers from one compose file: `postgres`
+and `platform`. A small VM is enough: 1 GB of memory with swap. PostgreSQL publishes no
+port, and the API is published on the host's loopback only. How the operator reaches it
+is the deployment's choice (§14): a private network, an SSH tunnel, or a reverse proxy
+with TLS. Whichever it is, its address is the OAuth callback's host. The runbook is
+[`docs/operations.md`](../operations.md).
 
 **Releases.** Every commit on `main` whose CI passed is built into
-`ghcr.io/jajiz/coinpilot:<sha>`. Tags never move. A deploy is dispatched by hand: the
-workflow authenticates to Google Cloud with Workload Identity Federation, so no key file
-exists, and runs `deploy.sh` on the VM. It dumps the database, migrates with the new
+`ghcr.io/jajiz/coinpilot:<sha>`. Tags never move. A deploy is dispatched by hand and runs `deploy.sh`
+on the host; the workflow included reaches it without a stored key. It dumps the database, migrates with the new
 image, recreates the platform and waits for its health check. A rollback starts the
 previous image and runs no migration, which is safe because **every migration leaves the
 previous release working**: additive only.
 
 **Stopping waits for the tick.** The platform's stop grace period is longer than a tick,
 so a deploy never cuts an evaluation between an order and its answer (§9.2). That holds
-when Docker stops the platform. Stopping the VM is bounded by Compute Engine's shutdown
-period instead, about 90 s, so a tick under way can be cut there: the operator stops the
-VM only when nothing is due.
+when Docker stops the platform. Stopping the host is bounded by its own shutdown period
+instead, often shorter, so a tick under way can be cut there: the operator stops the
+host only when nothing is due.
 
-**The master encryption key** lives in the VM's `.env` and in the operator's password
-manager, outside Google Cloud. If it is lost, every stored credential is unrecoverable.
+**The master encryption key** lives in the host's `.env` and in the operator's password
+manager, outside the host's provider. If it is lost, every stored credential is unrecoverable.
 Rotation re-seals every record under the new key, one transaction and one row lock each,
 and only then is the old key removed.
 
-**Backups.** A dump before every deploy, on the VM, and 14 daily disk snapshots off it.
+**Backups.** A dump before every deploy, on the host. Copies off the host are the
+operator's to arrange.
 
 **Logs** stay in Docker, bounded per container. The failure-streak warning is read there
 until project 2 brings notifications.
@@ -743,6 +743,12 @@ Non-obvious decisions a reviewer would otherwise question.
 - **Multi-tenant schema and runtime from the start.** Chosen deliberately over a
   single-user build, accepting the larger project 1 in exchange for not retrofitting
   identity later.
+- **No public entry point unless someone else needs one.** The API binds to loopback,
+  and the way in is chosen by who must reach it. While the only user is the operator, a
+  private network or a tunnel gives HTTPS with no port open and nothing to scan; a
+  reverse proxy puts 80 and 443 on the internet, scanned from the first day, and is
+  worth that only once other people use the service — together with the legal review in
+  §15.
 
 ## 15. Accepted risks and deferred decisions
 
@@ -770,9 +776,9 @@ Non-obvious decisions a reviewer would otherwise question.
 ## 16. Deferred to project 2
 
 - The application: mobile-consultable UI, configuration screens, notifications.
-- **How the API is exposed to the internet** — a tunnel with no open ports, or a reverse
-  proxy with certificates. Authentication itself is in project 1; the exposure shape is
-  not.
+- **Serving the application from the API's origin.** How the API is reached is the
+  deployment's choice (§13, §14); whichever it is, the application must be served from
+  the same origin, so its cookies stay first-party.
 - **Kraken WebSockets.** Technically viable today — v2 has private balance and execution
   channels — and rejected for project 1 for three reasons: a persistent connection must be
   supervised and its characteristic failure is silent non-delivery; a periodic

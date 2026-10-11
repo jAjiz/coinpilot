@@ -1,32 +1,42 @@
 # Operations
 
-How the platform runs in production, and every operation on it: provisioning, secrets,
-access, deploy, rollback, master-key rotation, backups, logs. The design behind it is the
-spec's §13 ([`specs/2026-09-17-platform-design.md`](specs/2026-09-17-platform-design.md)).
+How to run the platform on a host of your own: requirements, preparing the host, secrets,
+reaching the API, deploy, rollback, master-key rotation, backups, logs. The design behind
+it is the spec's §13 ([`specs/2026-09-17-platform-design.md`](specs/2026-09-17-platform-design.md)).
 
-Shell variables stand for everything the repository must not hold. Set them once per
-shell:
+## 1. Requirements
+
+- **A Linux host** with outbound internet access. `deploy/bootstrap.sh` prepares Ubuntu or
+  Debian; any other distribution needs the same pieces installed by hand.
+- **1 GB of memory and 2 GB of swap** are enough: during a deploy two images are on disk,
+  a dump is written and a migration runs beside PostgreSQL and the platform. Some 10 GB
+  of disk.
+- **Docker Engine with Compose v2.** `deploy.sh` uses `up --wait`.
+- **A Google OAuth client** of type "Web application" (Google Cloud console → APIs &
+  Services → Credentials).
+- **A static public IP** is recommended, so each Kraken key can be restricted to it
+  (section 10).
+
+No inbound port is needed by the platform itself. PostgreSQL publishes none, and the API
+listens on the host's loopback.
+
+## 2. Preparing the host
+
+A swap file, if the host has none:
 
 ```bash
-PROJECT=...   # the Google Cloud project id
-REGION=...    # us-east1, us-central1 or us-west1: the free tier's regions
-ZONE=...      # e.g. us-east1-b
-VM=coinpilot
+sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 ```
 
-## 1. What runs where
+Then copy `deploy/bootstrap.sh` to the host and run it once:
 
-One `e2-micro` Ubuntu 26.04 LTS minimal VM in Google Cloud, inside the free tier: 1 GB of
-memory plus a 2 GB swap file, a 30 GB standard disk, standard network tier. Docker runs
-`postgres` and `platform` from `/opt/coinpilot/compose.yml`. No port is open to the
-internet: SSH arrives through IAP, and the API listens on the VM's loopback. Images are
-`ghcr.io/jajiz/coinpilot:<sha>`.
+```bash
+sudo bash bootstrap.sh
+```
 
-The swap is what makes 1 GB enough: during a deploy two images are on disk, a dump is
-written and a migration runs beside PostgreSQL and the platform. If the VM is short of
-memory anyway (`free -h`, the platform restarting in `./compose.sh ps`), resize it to
-`e2-small`: stop it, `gcloud compute instances set-machine-type "$VM" --zone "$ZONE"
---machine-type e2-small`, start it. That leaves the free tier.
+It installs Docker from Docker's repository, turns on unattended security upgrades,
+bounds container logs and creates `/opt/coinpilot`. It opens no port.
 
 Files in `/opt/coinpilot`:
 
@@ -36,83 +46,14 @@ Files in `/opt/coinpilot`:
 | `release.env` | The current tag, written by `deploy.sh` |
 | `releases` | Every release that became healthy, newest last |
 | `backups/` | A dump before each deploy, the newest ten |
-| `compose.yml`, `compose.sh`, `deploy.sh` | From `deploy/` in this repository, copied by each deploy |
-
-## 2. Provisioning (once)
-
-```bash
-gcloud config set project "$PROJECT"
-gcloud services enable compute.googleapis.com iap.googleapis.com iamcredentials.googleapis.com sts.googleapis.com
-
-# A static address, so the Kraken key can be restricted to it. Skip if it is reserved
-# already; it must be in $REGION and on the same network tier as the VM.
-gcloud compute addresses create "$VM" --region "$REGION" --network-tier STANDARD
-
-# e2-micro, a 30 GB pd-standard disk and the standard tier are what the free tier covers.
-gcloud compute instances create "$VM" --zone "$ZONE" \
-  --machine-type e2-micro \
-  --image-family ubuntu-minimal-2604-lts-amd64 --image-project ubuntu-os-cloud \
-  --boot-disk-size 30GB --boot-disk-type pd-standard \
-  --address "$VM" --network-tier STANDARD \
-  --metadata enable-oslogin=TRUE \
-  --shielded-secure-boot --shielded-vtpm --shielded-integrity-monitoring \
-  --no-service-account --no-scopes
-
-# SSH from IAP only. The default network admits SSH and RDP from anywhere.
-gcloud compute firewall-rules delete default-allow-ssh default-allow-rdp --quiet
-gcloud compute firewall-rules create allow-ssh-from-iap --network default \
-  --direction INGRESS --allow tcp:22 --source-ranges 35.235.240.0/20
-# Expect no INGRESS rule but this one and default-allow-internal (and default-allow-icmp,
-# if it exists). Restricting default-allow-ssh to the same range is equivalent.
-gcloud compute firewall-rules list
-
-# Then, on the VM: a 2 GB swap file that survives a reboot, and the bootstrap.
-gcloud compute ssh "$VM" --zone "$ZONE" --tunnel-through-iap --command \
-  "sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile && echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab"
-# A remote path without a directory lands in the home directory. Not "~/": on Windows,
-# gcloud copies with PuTTY's pscp, which does not expand it.
-gcloud compute scp deploy/bootstrap.sh "$VM:bootstrap.sh" --zone "$ZONE" --tunnel-through-iap
-gcloud compute ssh "$VM" --zone "$ZONE" --tunnel-through-iap --command "sudo bash bootstrap.sh"
-```
-
-The pipeline's identity (Workload Identity Federation; no key file exists):
-
-```bash
-PROJECT_NUMBER=$(gcloud projects describe "$PROJECT" --format 'value(projectNumber)')
-SA="coinpilot-deploy@$PROJECT.iam.gserviceaccount.com"
-
-gcloud iam service-accounts create coinpilot-deploy --display-name "CoinPilot deploy"
-gcloud iam workload-identity-pools create github --location global
-gcloud iam workload-identity-pools providers create-oidc coinpilot --location global \
-  --workload-identity-pool github \
-  --issuer-uri https://token.actions.githubusercontent.com \
-  --attribute-mapping "google.subject=assertion.sub,attribute.repository=assertion.repository,attribute.environment=assertion.environment" \
-  --attribute-condition "assertion.repository == 'jAjiz/coinpilot' && assertion.environment == 'production'"
-gcloud iam service-accounts add-iam-policy-binding "$SA" --role roles/iam.workloadIdentityUser \
-  --member "principalSet://iam.googleapis.com/projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/github/attribute.repository/jAjiz/coinpilot"
-
-gcloud projects add-iam-policy-binding "$PROJECT" --member "serviceAccount:$SA" --role roles/iap.tunnelResourceAccessor
-gcloud projects add-iam-policy-binding "$PROJECT" --member "serviceAccount:$SA" --role roles/compute.viewer
-gcloud compute instances add-iam-policy-binding "$VM" --zone "$ZONE" --member "serviceAccount:$SA" --role roles/compute.osAdminLogin
-```
-
-In GitHub: Settings → Environments → New environment `production`; "Deployment
-branches": `main` only. Add the environment secrets `GCP_PROJECT`, `GCP_ZONE`, `GCP_VM`,
-`GCP_DEPLOY_SA` (`$SA`) and `GCP_WIF_PROVIDER`:
-`projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/github/providers/coinpilot`.
-None of them grants access on its own, but as secrets they are masked in the workflow's
-log, where `gcloud` would otherwise print the project, the zone and the VM.
-
-After the first Release run: GitHub → Packages → `coinpilot` → Package settings →
-Change visibility → Public. Check from any machine, with no login:
-`docker pull ghcr.io/jajiz/coinpilot:<sha>`.
+| `compose.yml`, `compose.sh`, `deploy.sh` | From `deploy/` in this repository (section 5) |
 
 ## 3. Secrets
 
-On the VM: `sudo install -m 0600 /dev/null /opt/coinpilot/.env`, then fill it from
+On the host: `sudo install -m 0600 /dev/null /opt/coinpilot/.env`, then fill it from
 [`deploy/env.production.example`](../deploy/env.production.example) with
-`sudo nano /opt/coinpilot/.env`, generating each secret on the VM with the command beside
-it.
+`sudo nano /opt/coinpilot/.env`, generating each secret on the host with the command
+beside it.
 
 Copy `CREDENTIAL_KEYS` into your password manager before any credential is stored: if it
 is lost, every stored Kraken key is unreadable, and the only remedy is for each user to
@@ -124,36 +65,53 @@ name and nothing else: `sudo grep -c '^[A-Z_]*=$' /opt/coinpilot/.env` must say 
 
 ## 4. Reaching the API
 
-```bash
-gcloud compute ssh "$VM" --zone "$ZONE" --tunnel-through-iap -- -N -L 8000:localhost:8000
-```
+The API listens on `127.0.0.1:8000` on the host. Put something in front of it according
+to who must reach it:
 
-Leave it open; the API is at `http://localhost:8000` (`/docs`, and sign in at
-`/auth/login/google`). Stop the local development API first: it would hold port 8000,
-and two schedulers on the same Kraken account would both invest.
+| Way in | When | What it takes |
+|---|---|---|
+| SSH tunnel | One operator, from one computer | `ssh -N -L 8000:localhost:8000 <user>@<host>`; the API is at `http://localhost:8000` |
+| Private network (Tailscale, WireGuard, …) | The operator's own devices, phone included | The network's HTTPS address for the host; no port opened |
+| Reverse proxy with TLS (Caddy, nginx, …) | Other people use the service | Ports 80 and 443 open to the internet, and a domain |
 
-Every IAP connection (`ssh`, `scp`, this tunnel) needs a network that does not inspect
-TLS. Behind a corporate VPN it fails with `CERTIFICATE_VERIFY_FAILED` or "Remote side
-unexpectedly closed network connection": disconnect the VPN.
+Whichever it is, the address it gives is the OAuth callback's host: set
+`GOOGLE_REDIRECT_URI` in `.env` to `<address>/auth/callback/google`, and add the same URI
+to the OAuth client's authorized redirect URIs. Then `/docs` describes the API, and you
+sign in at `/auth/login/google`.
+
+Do not run a development API against the same Kraken account as production: two
+schedulers would both invest.
 
 ## 5. Deploy
 
-GitHub → Actions → Deploy → Run workflow → `deploy`, with the full SHA of a commit on
-`main` whose Release run succeeded. On the VM, by hand:
-`sudo /opt/coinpilot/deploy.sh deploy <sha>`.
+Every commit on `main` whose CI passed is built by the Release workflow into
+`ghcr.io/jajiz/coinpilot:<sha>`. A fork publishes its own image: change that name in
+`deploy/compose.yml` and `deploy/deploy.sh`.
+
+On the host, with the files from `deploy/` copied to `/opt/coinpilot`:
+
+```bash
+sudo /opt/coinpilot/deploy.sh deploy <sha>
+```
 
 It dumps the database to `backups/`, migrates with the new image, recreates the platform
-and waits up to four minutes for it to report healthy. If it does not, the step fails
-with the platform's last 100 log lines, and nothing else changes: roll back.
+and waits up to four minutes for it to report healthy. If it does not, it fails with the
+platform's last 100 log lines, and nothing else changes: roll back.
+
+The Deploy workflow (`.github/workflows/deploy.yml`) does the same from GitHub → Actions,
+with manual approval through the `production` environment: it copies the `deploy/` files
+and runs `deploy.sh` over SSH. The included one connects to a Google Cloud VM, with
+Workload Identity Federation and IAP. For another host, replace its authentication and
+SSH steps; the command it runs stays the same.
 
 ---
 
-Sections 6 to 9 run on the VM in a root shell, because `.env` and `backups/` are root's:
-`sudo -i`, then `cd /opt/coinpilot`.
+Sections 6 to 9 run on the host in a root shell, because `.env` and `backups/` are
+root's: `sudo -i`, then `cd /opt/coinpilot`.
 
 ## 6. Rollback
 
-Actions → Deploy → `rollback`, or `./deploy.sh rollback`. It starts the release before
+`./deploy.sh rollback`, or Actions → Deploy → `rollback`. It starts the release before
 the current one, with no migration. Rolling back twice returns to where you started.
 After a deploy that never became healthy, a rollback returns to the last release that
 did.
@@ -173,7 +131,7 @@ cd /opt/coinpilot
 
 Rotate when the key may have been exposed, and when someone who knew it no longer should.
 
-1. On the VM, generate the new key (command in `env.production.example`) with the next
+1. On the host, generate the new key (command in `env.production.example`) with the next
    version number, and save it in your password manager.
 2. In `.env`: `CREDENTIAL_KEYS=1:<old>,2:<new>` and `CREDENTIAL_KEY_VERSION=2`.
 3. `./compose.sh up -d --wait --force-recreate platform` — new credentials are now
@@ -183,13 +141,14 @@ Rotate when the key may have been exposed, and when someone who knew it no longe
 5. `./compose.sh run --rm platform python scripts/rotate_master_key.py --check` —
    expect `not under it : 0`.
 6. Remove `1:<old>,` from `CREDENTIAL_KEYS`, and recreate the platform again as in 3.
-7. `GET /portfolio` through the tunnel reads your balance: the record opens with the new
-   key alone. Only now delete the old key from your password manager. Dumps taken before
-   step 4 still need it; keep it while a dump or a copy of the disk holds one.
+7. `GET /portfolio` reads your balance: the record opens with the new key alone. Only now
+   delete the old key from your password manager. Dumps taken before step 4 still need
+   it; keep it while a dump or a copy of the disk holds one.
 
 ## 8. Backups and restore
 
-Each deploy leaves a dump in `/opt/coinpilot/backups/` (newest ten).
+Each deploy leaves a dump in `/opt/coinpilot/backups/` (newest ten). They live on the
+host, so copy them somewhere else too: a lost host takes them with it.
 
 - To take a dump by hand:
   `./compose.sh exec -T postgres pg_dump -U coinpilot -Fc coinpilot > backups/manual.dump`.
@@ -202,9 +161,8 @@ failing appears once, as
 `WARNING coinpilot.scheduler: user <id>: 3 scheduled operations in a row have failed`:
 `./compose.sh logs platform | grep WARNING`.
 
-## 10. Restricting the Kraken key to the VM
+## 10. Restricting the Kraken key to the host
 
-In Kraken → API → the key → "IP address allowlist": the static address
-(`gcloud compute addresses describe "$VM" --region "$REGION" --format 'value(address)'`).
-The key then works from the VM alone; your local `scripts/check_key.py` will be refused,
+In Kraken → API → the key → "IP address allowlist": the host's static public address.
+The key then works from the host alone; a local `scripts/check_key.py` will be refused,
 which is the point.
