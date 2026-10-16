@@ -198,3 +198,49 @@ def test_a_change_to_anything_else_leaves_the_schedule_alone(api, db_session, ma
     api.patch("/api/config", json={"min_drift_pct": "5"}, headers=headers)
 
     assert get_settings(db_session, user.id).next_rebalance_at == planned
+
+
+def test_onboarding_is_not_finished_on_a_new_user(api, make_user, login):
+    body = api.patch("/api/config", json={"fiat": "EUR"}, headers=login(make_user())).json()
+
+    assert body["onboarded_at"] is None
+
+
+def test_onboarded_records_the_time_once(api, make_user, login):
+    headers = login(make_user())
+    api.patch("/api/config", json={"fiat": "EUR"}, headers=headers)
+
+    first = api.patch("/api/config", json={"onboarded": True}, headers=headers).json()
+    assert first["onboarded_at"].startswith("2026-09-29T12:00:00")  # FIXED_NOW in conftest
+
+    again = api.patch("/api/config", json={"onboarded": True}, headers=headers).json()
+    assert again["onboarded_at"] == first["onboarded_at"]
+
+
+def test_onboarded_false_is_refused(api, make_user, login):
+    headers = login(make_user())
+    api.patch("/api/config", json={"fiat": "EUR"}, headers=headers)
+
+    assert api.patch("/api/config", json={"onboarded": False}, headers=headers).status_code == 422
+
+
+def test_onboarded_does_not_move_the_next_runs(api, db_session, make_user, login):
+    user = make_user()
+    headers = login(user)
+    api.patch(
+        "/api/config",
+        json={
+            "fiat": "EUR",
+            "invest_cadence_mode": "INTERVAL",
+            "invest_interval_days": 7,
+            "invest_cadence_anchor": "2026-01-05T12:00:00Z",
+        },
+        headers=headers,
+    )
+    planned = datetime(2026, 12, 1, 12, 0, tzinfo=UTC)
+    update_settings(db_session, user.id, next_invest_at=planned, next_rebalance_at=planned)
+
+    assert api.patch("/api/config", json={"onboarded": True}, headers=headers).status_code == 200
+
+    settings = get_settings(db_session, user.id)
+    assert (settings.next_invest_at, settings.next_rebalance_at) == (planned, planned)

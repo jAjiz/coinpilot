@@ -10,6 +10,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, SecretStr, model_validator
 
@@ -97,6 +98,7 @@ class ConfigOut(BaseModel):
     next_invest_at: datetime | None
     next_rebalance_at: datetime | None
     paused: bool
+    onboarded_at: datetime | None
 
 
 class ConfigPatch(BaseModel):
@@ -121,6 +123,8 @@ class ConfigPatch(BaseModel):
     rebalance_interval_days: int | None = Field(default=None, ge=0, le=3650)
     rebalance_interval_months: int | None = Field(default=None, ge=0, le=120)
     rebalance_cadence_anchor: AwareDatetime | None = None
+    # Only `true`: onboarding, once finished, is not undone. A time already set stays.
+    onboarded: Literal[True] | None = None
 
     @model_validator(mode="after")
     def _no_null_for_required(self) -> ConfigPatch:

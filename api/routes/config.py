@@ -51,6 +51,8 @@ def read_config(user: CurrentUser, session: Db) -> UserSettings:
 def patch_config(body: ConfigPatch, user: CurrentUser, session: Db, context: Ctx) -> UserSettings:
     changes = body.model_dump(exclude_unset=True)
     fiat = changes.pop("fiat", None)
+    # Not a setting the cadences or the scheduler read: kept out of both.
+    onboarded = changes.pop("onboarded", None)
     fiat = fiat.strip().upper() if isinstance(fiat, str) else None
 
     settings = db.lock_settings(session, user.id)
@@ -78,4 +80,6 @@ def patch_config(body: ConfigPatch, user: CurrentUser, session: Db, context: Ctx
     )
     if moves:
         settings = db.update_settings(session, user.id, **moves)
+    if onboarded and settings.onboarded_at is None:
+        settings = db.update_settings(session, user.id, onboarded_at=context.now())
     return settings
