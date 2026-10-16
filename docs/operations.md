@@ -75,9 +75,9 @@ to who must reach it:
 | Reverse proxy with TLS (Caddy, nginx, …) | Other people use the service | Ports 80 and 443 open to the internet, and a domain |
 
 Whichever it is, the address it gives is the OAuth callback's host: set
-`GOOGLE_REDIRECT_URI` in `.env` to `<address>/auth/callback/google`, and add the same URI
-to the OAuth client's authorized redirect URIs. Then `/docs` describes the API, and you
-sign in at `/auth/login/google`.
+`GOOGLE_REDIRECT_URI` in `.env` to `<address>/api/auth/callback/google`, and add the same
+URI to the OAuth client's authorized redirect URIs. Then `/api/docs` describes the API, and
+you sign in at `/api/auth/login/google`.
 
 Do not run a development API against the same Kraken account as production: two
 schedulers would both invest.
@@ -126,6 +126,9 @@ cd /opt/coinpilot
 ./compose.sh exec -T postgres pg_restore -U coinpilot -d coinpilot --clean --if-exists < backups/<dump>
 ./deploy.sh rollback
 ```
+
+Rolling back to a release before the `/api` prefix needs `GOOGLE_REDIRECT_URI` without
+`/api`: keep both URIs in the OAuth client and change `.env` only.
 
 ## 7. Rotating the master key
 
