@@ -42,7 +42,9 @@ RUN_DB_INTEGRATION=true PYTHONPATH=. DATABASE_URL=postgresql+psycopg://coinpilot
 ## Review Focus
 
 1. **An unknown `/api` path is a JSON `404`, never the application's `index.html`.** A
-   client that calls a removed route must see an error, not HTML it cannot parse. → Task 5.
+   client that calls a removed route must see an error, not HTML it cannot parse. That
+   holds for `/api` itself, without the slash, and for every method, not only `GET`.
+   → Task 5.
 2. **No file outside the build is ever served.** `/../alembic.ini` and its encoded forms
    resolve outside `web/dist/` and get `index.html`, not the file. → Task 5.
 3. **A failed sign-in never leaves a half-signed-in browser.** Every refusal of the
@@ -52,6 +54,8 @@ RUN_DB_INTEGRATION=true PYTHONPATH=. DATABASE_URL=postgresql+psycopg://coinpilot
    scheduler's next runs. → Task 3.
 5. **A snapshot written before this phase still reads.** A `holdings` JSON with no
    `cash_target_pct` gives `null`, not a 500. → Task 4.
+6. **The order of `holdings` is the API's, not the database's.** The column is JSONB,
+   which keeps no key order, so `_out` sorts the list itself. → Task 4.
 
 **Rolling back past this release** needs `GOOGLE_REDIRECT_URI` set back to the path
 without `/api`: the previous image has no `/api` route. The Google client keeps both URIs
@@ -83,6 +87,8 @@ registered, so only `.env` changes. Task 6 writes this into the runbook.
 **Files:**
 - Modify: `api/app.py`, `api/routes/auth.py:31-35`, `Dockerfile` (`HEALTHCHECK`), `.github/workflows/ci.yml` (lines 94, 99, 104, 113)
 - Modify: every request path in `tests/integration/test_api_*.py` and `tests/unit/api/test_database_errors.py`
+- Modify: the error messages that name a route: `api/routes/assets.py:60`,
+  `api/routes/config.py:46,60`, `api/routes/portfolio.py:36,44,47`, `core/execution.py:275,278`
 - Create: `tests/integration/test_api_prefix.py`
 
 **Interfaces:**
@@ -115,7 +121,10 @@ def test_the_login_cookie_is_scoped_to_the_callback(api):
 - [ ] **Step 3: Implement.** `FastAPI(..., docs_url="/api/docs", openapi_url="/api/openapi.json",
   redoc_url=None)`; `app.include_router(router, prefix=API_PREFIX)` for each router. Change the
   two cookie-path constants. `HEALTHCHECK` and CI's three `curl`s call `/api/health`; CI's
-  `GOOGLE_REDIRECT_URI` becomes `http://localhost:8000/api/auth/callback/google`.
+  `GOOGLE_REDIRECT_URI` becomes `http://localhost:8000/api/auth/callback/google`. The error
+  messages listed above name the route with its prefix (`"choose a fiat with PATCH /api/config
+  first"`): the application shows a refusal verbatim (application spec §5.1), and a path
+  without `/api` is one that answers `404`. No test asserts these messages today.
 
 - [ ] **Step 4: Rewrite the existing tests' paths.** Prefix every request path string with
   `/api` in the files listed (`api.get("/config"` → `api.get("/api/config"`, and so on for
@@ -247,10 +256,12 @@ class PortfolioOut(BaseModel):
     cash: str
     cash_target_pct: str | None
     cash_weight_pct: str | None
-    holdings: list[HoldingOut]  # managed first, then unmanaged, then locked, as the snapshot orders them
+    holdings: list[HoldingOut]  # managed first, then unmanaged, then locked; by asset within each
 ```
 
-  The snapshot's stored JSON is unchanged; only the response is reshaped.
+  The snapshot's stored JSON is unchanged; only the response is reshaped. The order is
+  set by `_out`, not read from the snapshot: `holdings` is JSONB, and PostgreSQL stores an
+  object's keys in its own order (shorter keys first), not in the order they were written.
 
 - [ ] **Step 1: Change the tests.** Assertions that read `body["holdings"]["assets"][name]`
   read the element of `body["holdings"]` whose `asset == name`; `cash_target_pct` and
@@ -261,11 +272,18 @@ def test_a_snapshot_without_cash_percentages_still_reads(api, db_session, make_u
     # keep_snapshot(...) with holdings={"assets": {"BTC": {...}}} and no cash keys
     body = api.get("/api/portfolio", headers=login(user)).json()
     assert body["cash_target_pct"] is None and body["holdings"][0]["asset"] == "BTC"
+
+def test_holdings_are_listed_managed_then_unmanaged_then_locked(api, db_session, make_user, login):
+    # keep_snapshot(...) with assets written in the order DOT.S (locked), XRP (unmanaged),
+    # SOL (managed), BTC (managed): the order JSONB would not keep
+    body = api.get("/api/portfolio", headers=login(user)).json()
+    assert [h["asset"] for h in body["holdings"]] == ["BTC", "SOL", "XRP", "DOT.S"]
 ```
 
 - [ ] **Step 2: Run** `tests/integration/test_api_portfolio.py`. Expected: FAIL.
 
-- [ ] **Step 3: Implement `_out`** with `.get()` on the two cash keys and on `assets`.
+- [ ] **Step 3: Implement `_out`** with `.get()` on the two cash keys and on `assets`. Sort the
+  list by `(locked, not managed, asset)`.
 
 - [ ] **Step 4: Run the suite.** Expected: all pass.
 
@@ -278,7 +296,8 @@ def test_a_snapshot_without_cash_percentages_still_reads(api, db_session, make_u
 - Modify: `api/app.py` (`create_app`), `api/main.py` (`build`)
 
 **Interfaces:**
-- Produces: `mount_application(app: FastAPI, dist: Path) -> None` in `api/web.py`, and
+- Produces: `mount_application(app: FastAPI, dist: Path) -> None` and
+  `file_in_build(dist: Path, path: str) -> Path | None` in `api/web.py`, and
   `create_app(context: AppContext, web_dist: Path | None = None) -> FastAPI`, which calls it
   after every router when `web_dist` is given. `build()` passes
   `Path(__file__).resolve().parents[1] / "web" / "dist"` when that directory holds an
@@ -289,11 +308,17 @@ def test_a_snapshot_without_cash_percentages_still_reads(api, db_session, make_u
 
 ```python
 CONTENT_SECURITY_POLICY = (
-    "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
     "connect-src 'self'; worker-src 'self'; manifest-src 'self'; "
     "frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
 )
 ```
+
+  Scripts stay same-origin only. Styles allow `'unsafe-inline'` because shadcn/ui's Radix
+  primitives (the scroll lock of a dialog or a sheet) and its toasts insert `<style>`
+  elements at run time, which `style-src 'self'` would refuse. A nonce would need the
+  platform to rewrite `index.html` on every request; an injected style cannot run code, so
+  the gain does not pay for it.
 
 - [ ] **Step 1: Write the failing tests** in `tests/unit/api/test_web.py`, with a fixture that
   writes `index.html` (`<html>app</html>`), `assets/index-abc.js` and `sw.js` into
@@ -315,17 +340,27 @@ def test_an_unhashed_file_is_not_cached(web):
 def test_the_application_carries_the_security_policy(web):
     assert web.get("/").headers["content-security-policy"] == CONTENT_SECURITY_POLICY
 
-def test_an_unknown_api_path_is_a_json_404(web):
-    response = web.get("/api/nothing-here")
+@pytest.mark.parametrize("method", ["GET", "POST", "PUT", "PATCH", "DELETE"])
+@pytest.mark.parametrize("path", ["/api", "/api/", "/api/nothing-here"])
+def test_an_unknown_api_path_is_a_json_404(web, method, path):
+    response = web.request(method, path)
     assert response.status_code == 404 and response.json() == {"detail": "Not Found"}
 
 def test_the_api_keeps_answering(web):
     assert web.get("/api/health").json() == {"status": "ok"}
 
-def test_nothing_outside_the_build_is_served(web, tmp_path):
-    (tmp_path.parent / "secret.txt").write_text("secret")
-    for path in ("/../secret.txt", "/%2e%2e/secret.txt", "/assets/../../secret.txt"):
-        assert "secret" not in web.get(path).text
+# The client normalises `..` before it sends a request, so the guard is tested on the
+# function that applies it, not through HTTP.
+@pytest.mark.parametrize("path", ["../secret.txt", "assets/../../secret.txt", "/etc/passwd", ""])
+def test_nothing_outside_the_build_is_resolved(tmp_path, path):
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (tmp_path / "secret.txt").write_text("secret")
+    assert file_in_build(dist, path) is None
+
+def test_a_file_of_the_build_is_resolved(tmp_path):
+    (tmp_path / "sw.js").write_text("")
+    assert file_in_build(tmp_path, "sw.js") == (tmp_path / "sw.js").resolve()
 
 def test_without_a_build_nothing_but_the_api_answers(api_without_web):
     assert api_without_web.get("/settings").status_code == 404
@@ -333,11 +368,15 @@ def test_without_a_build_nothing_but_the_api_answers(api_without_web):
 
 - [ ] **Step 2: Run** `tests/unit/api/test_web.py`. Expected: FAIL (`api.web` missing).
 
-- [ ] **Step 3: Implement `mount_application`.** Register `GET /api/{path:path}` raising
-  `HTTPException(404)` first, then `GET /{path:path}`: resolve `dist / path`, serve it with
-  `FileResponse` only when it is a file and `resolved.is_relative_to(dist.resolve())`;
-  otherwise `index.html`. Neither route appears in the OpenAPI document
-  (`include_in_schema=False`).
+- [ ] **Step 3: Implement `mount_application`.** First the API's 404: one
+  `api_route` on `/api` and on `/api/{path:path}`, for `GET`, `HEAD`, `POST`, `PUT`,
+  `PATCH`, `DELETE` and `OPTIONS`, raising `HTTPException(404)`. Without it `/api` falls
+  through to the application, and a `POST` to an unknown `/api` path meets the
+  application's `GET` route and answers `405`. Then `GET /{path:path}`: serve
+  `file_in_build(dist, path)` with `FileResponse` when it is not `None`, otherwise
+  `index.html`. `file_in_build(dist: Path, path: str) -> Path | None` resolves `dist / path`
+  and returns it only when it is a file and `resolved.is_relative_to(dist.resolve())`. None
+  of these routes appears in the OpenAPI document (`include_in_schema=False`).
 
 - [ ] **Step 4: Wire `create_app` and `build`.** Run the whole suite. Expected: all pass.
 
@@ -357,8 +396,12 @@ def test_without_a_build_nothing_but_the_api_answers(api_without_web):
   `.env` only."* Platform spec §11 gains one line above its table: *"Every path is under the
   `/api` prefix (application spec §2.1)."*
 
-- [ ] **Step 2: Verify** `grep -rn "localhost:8000/auth\|/auth/callback/google" --include=*.md --include=*.example .`
-  prints only lines that contain `/api/auth`.
+- [ ] **Step 2: Verify** `grep -rn "localhost:8000/auth\|/auth/callback/google" --include=*.md --include=*.example --exclude-dir=plans --exclude-dir=.venv .`
+  prints only lines that contain `/api/auth`. `docs/plans/` is left out: the plans of
+  earlier phases record the paths of their time and are not rewritten. Then
+  `grep -rnE "(GET|POST|PUT|PATCH|DELETE) /[a-z]" api core` prints, without `/api`, only
+  docstrings and comments (`api/routes/proposal.py:3`, `core/catalog.py:4`,
+  `core/reading.py:3`), never an error message.
 
 - [ ] **Step 3: Commit** — `docs: the API's paths under /api`
 
