@@ -20,3 +20,16 @@ The ordering is not arbitrary. Phases 1 to 3 cannot move money because nothing i
 to an account. Phase 4 reads a real account but has no order path. The first phase that
 can spend a euro is 5, by which point the engine, the schema and the exchange layer have
 each been verified on their own.
+
+## Project 2 — the application
+
+Designed in [`../specs/2026-10-16-ui-design.md`](../specs/2026-10-16-ui-design.md). Cycle 1
+is five phases, in the order of its §9; cycle 2, notifications, gets its own spec.
+
+| Phase | Deliverable | How you verify it |
+|---|---|---|
+| **9. The platform, ready for the application** | The `/api` prefix, the callback that redirects, `onboarded_at`, typed holdings, the application served from the same origin | Sign in at `/api/auth/login/google` and land on `/`. `/api/docs` lists every route under `/api`. |
+| **10. The application's skeleton** | `web/` with Vite, the generated client, session and guards; the multi-stage image; the CI job | Deploy, open the address on your phone, sign in, see the empty shell. Install it as an app. |
+| **11. Onboarding** | The four-step wizard | Run it against your real account: the key, your holdings prefilled, a cadence, the summary. |
+| **12. Dashboard and proposal** | Value, allocation, invest now, rebalance now, approve | Request a rebalance and approve it from the phone. |
+| **13. History and settings** | The execution history; every setting editable; pause; sign out | Change a cadence in settings and see the next run move. |
