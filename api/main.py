@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 from datetime import UTC, datetime
 from functools import partial
+from pathlib import Path
 
 import httpx
 from fastapi import FastAPI
@@ -24,6 +25,9 @@ from core.db.session import configure, get_engine, session_scope
 from core.tokens import TokenSigner
 from exchange.client import KrakenClient, build_http_client
 from exchange.limits import KeyLimiter
+
+# The application's build: in the image, `/app/web/dist`. A development run has none.
+WEB_DIST = Path(__file__).resolve().parents[1] / "web" / "dist"
 
 # Kraken's private counter allows more; one call a second per key is what phase 3 tested.
 KRAKEN_MIN_INTERVAL_SECONDS = 1.0
@@ -52,4 +56,4 @@ def build() -> FastAPI:
         scheduler_lock=partial(advisory_scheduler_lock, get_engine()),
         now=now,
     )
-    return create_app(context)
+    return create_app(context, WEB_DIST if (WEB_DIST / "index.html").is_file() else None)

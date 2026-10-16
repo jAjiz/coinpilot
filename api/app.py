@@ -6,6 +6,7 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -15,6 +16,7 @@ from sqlalchemy.exc import TimeoutError as PoolTimeout
 
 from api.context import AppContext
 from api.routes import assets, auth, config, credentials, health, history, invest, portfolio, proposal
+from api.web import mount_application
 from core.scheduler import Scheduler
 
 logger = logging.getLogger("coinpilot.api")
@@ -74,7 +76,8 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             await asyncio.to_thread(scheduler.stop)
 
 
-def create_app(context: AppContext) -> FastAPI:
+def create_app(context: AppContext, web_dist: Path | None = None) -> FastAPI:
+    """`web_dist` is the application's build, served from this origin; None serves the API alone."""
     app = FastAPI(
         title="CoinPilot",
         version="0.1.0",
@@ -99,4 +102,6 @@ def create_app(context: AppContext) -> FastAPI:
         history.router,
     ):
         app.include_router(router, prefix=API_PREFIX)
+    if web_dist is not None:
+        mount_application(app, web_dist)
     return app
