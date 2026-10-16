@@ -11,13 +11,13 @@ from core.tokens import hash_refresh_token
 
 
 def _start_login(api):
-    response = api.get("/auth/login/google", follow_redirects=False)
+    response = api.get("/api/auth/login/google", follow_redirects=False)
     assert response.status_code == 302
     return parse_qs(urlparse(response.headers["location"]).query)
 
 
 def _finish_login(api, query, code="the-code"):
-    return api.get("/auth/callback/google", params={"code": code, "state": query["state"][0]})
+    return api.get("/api/auth/callback/google", params={"code": code, "state": query["state"][0]})
 
 
 def _sign_in(api):
@@ -28,11 +28,11 @@ def _sign_in(api):
 
 def _refresh(api, token=None):
     """With no token, the browser path: the refresh cookie alone."""
-    return api.post("/auth/refresh", json=None if token is None else {"refresh_token": token})
+    return api.post("/api/auth/refresh", json=None if token is None else {"refresh_token": token})
 
 
 def test_health_needs_no_login(api):
-    assert api.get("/health").json() == {"status": "ok"}
+    assert api.get("/api/health").json() == {"status": "ok"}
 
 
 def test_login_redirects_to_google_with_pkce_and_remembers_the_state(api):
@@ -43,7 +43,7 @@ def test_login_redirects_to_google_with_pkce_and_remembers_the_state(api):
 
 
 def test_an_unknown_provider_is_not_found(api):
-    assert api.get("/auth/login/github", follow_redirects=False).status_code == 404
+    assert api.get("/api/auth/login/github", follow_redirects=False).status_code == 404
 
 
 def test_a_completed_login_creates_the_user_and_returns_both_tokens(
@@ -81,20 +81,20 @@ def test_a_state_that_does_not_match_is_refused(api, db_session, fake_google):
     """The state is what stops someone else's code being planted in this browser."""
     _start_login(api)
 
-    response = api.get("/auth/callback/google", params={"code": "c", "state": "forged"})
+    response = api.get("/api/auth/callback/google", params={"code": "c", "state": "forged"})
 
     assert response.status_code == 400
     assert get_user_by_identity(db_session, "google", fake_google.subject) is None
 
 
 def test_a_callback_with_no_login_started_is_refused(api):
-    assert api.get("/auth/callback/google", params={"code": "c", "state": "s"}).status_code == 400
+    assert api.get("/api/auth/callback/google", params={"code": "c", "state": "s"}).status_code == 400
 
 
 def test_a_login_google_did_not_grant_is_refused(api):
     _start_login(api)
 
-    assert api.get("/auth/callback/google", params={"error": "access_denied"}).status_code == 400
+    assert api.get("/api/auth/callback/google", params={"error": "access_denied"}).status_code == 400
 
 
 def test_a_code_google_refuses_is_refused(api, fake_google):
@@ -163,7 +163,7 @@ def test_a_disabled_user_cannot_refresh_and_the_sign_in_is_ended(api, db_session
 def test_me_answers_to_a_bearer_token(api, make_user, login):
     user = make_user(email="alice@example.test")
 
-    response = api.get("/auth/me", headers=login(user))
+    response = api.get("/api/auth/me", headers=login(user))
 
     assert response.status_code == 200
     assert response.json()["email"] == "alice@example.test"
@@ -173,21 +173,21 @@ def test_me_answers_to_a_bearer_token(api, make_user, login):
 def test_me_answers_to_the_cookie_a_login_left(api):
     _sign_in(api)
 
-    assert api.get("/auth/me").status_code == 200
+    assert api.get("/api/auth/me").status_code == 200
 
 
 def test_no_token_is_401(api):
-    assert api.get("/auth/me").status_code == 401
+    assert api.get("/api/auth/me").status_code == 401
 
 
 def test_a_token_that_does_not_verify_is_401(api):
-    assert api.get("/auth/me", headers={"Authorization": "Bearer not-a-token"}).status_code == 401
+    assert api.get("/api/auth/me", headers={"Authorization": "Bearer not-a-token"}).status_code == 401
 
 
 def test_a_token_for_a_user_that_does_not_exist_is_401(api, app_context):
     token = app_context.signer.issue(uuid.uuid4()).value
 
-    assert api.get("/auth/me", headers={"Authorization": f"Bearer {token}"}).status_code == 401
+    assert api.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"}).status_code == 401
 
 
 def test_a_disabled_user_with_a_valid_access_token_is_refused(api, db_session, make_user, login):
@@ -196,7 +196,7 @@ def test_a_disabled_user_with_a_valid_access_token_is_refused(api, db_session, m
     headers = login(user)
     set_user_status(db_session, user.id, UserStatus.DISABLED)
 
-    assert api.get("/auth/me", headers=headers).status_code == 403
+    assert api.get("/api/auth/me", headers=headers).status_code == 403
 
 
 def test_a_disabled_user_cannot_sign_in_again(api, db_session, fake_google):
@@ -209,7 +209,7 @@ def test_a_disabled_user_cannot_sign_in_again(api, db_session, fake_google):
 def test_logout_revokes_the_refresh_token_and_removes_both_cookies(api):
     token = _sign_in(api)["refresh_token"]
 
-    assert api.post("/auth/logout").status_code == 204
+    assert api.post("/api/auth/logout").status_code == 204
 
     assert api.cookies.get("coinpilot_token") is None
     assert api.cookies.get("coinpilot_refresh") is None
@@ -220,7 +220,7 @@ def test_an_application_logs_out_with_the_token_in_the_body(api):
     token = _sign_in(api)["refresh_token"]
     api.cookies.clear()
 
-    assert api.post("/auth/logout", json={"refresh_token": token}).status_code == 204
+    assert api.post("/api/auth/logout", json={"refresh_token": token}).status_code == 204
     assert _refresh(api, token).status_code == 401
 
 
@@ -228,6 +228,6 @@ def test_an_access_token_outlives_logout_only_by_its_own_short_life(api):
     """Pinned on purpose. An access token is never looked up, so logout cannot reach it;
     its lifetime, 15 minutes by default, is the bound (spec §15)."""
     access = _sign_in(api)["access_token"]
-    api.post("/auth/logout")
+    api.post("/api/auth/logout")
 
-    assert api.get("/auth/me", headers={"Authorization": f"Bearer {access}"}).status_code == 200
+    assert api.get("/api/auth/me", headers={"Authorization": f"Bearer {access}"}).status_code == 200

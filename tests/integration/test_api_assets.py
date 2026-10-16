@@ -4,11 +4,13 @@ from core.db.settings import create_settings, list_assets, upsert_asset
 
 
 def _with_fiat(api, headers, fiat="EUR"):
-    api.patch("/config", json={"fiat": fiat}, headers=headers)
+    api.patch("/api/config", json={"fiat": fiat}, headers=headers)
 
 
 def test_a_weight_needs_a_fiat_first(api, make_user, login):
-    assert api.put("/assets/XBT", json={"target_pct": "60"}, headers=login(make_user())).status_code == 409
+    assert (
+        api.put("/api/assets/XBT", json={"target_pct": "60"}, headers=login(make_user())).status_code == 409
+    )
 
 
 def test_an_asset_is_stored_with_its_resolved_pair(api, db_session, make_user, login):
@@ -16,7 +18,7 @@ def test_an_asset_is_stored_with_its_resolved_pair(api, db_session, make_user, l
     headers = login(user)
     _with_fiat(api, headers)
 
-    response = api.put("/assets/XBT", json={"target_pct": "60"}, headers=headers)
+    response = api.put("/api/assets/XBT", json={"target_pct": "60"}, headers=headers)
 
     assert response.status_code == 200
     assert response.json()["asset"] == "XBT"
@@ -30,8 +32,8 @@ def test_the_internal_name_and_lower_case_both_mean_the_same_asset(api, db_sessi
     headers = login(user)
     _with_fiat(api, headers)
 
-    api.put("/assets/xxbt", json={"target_pct": "30"}, headers=headers)
-    api.put("/assets/xbt", json={"target_pct": "40"}, headers=headers)
+    api.put("/api/assets/xxbt", json={"target_pct": "30"}, headers=headers)
+    api.put("/api/assets/xbt", json={"target_pct": "40"}, headers=headers)
 
     rows = list_assets(db_session, user.id)
     assert [(row.asset, row.target_pct) for row in rows] == [("XBT", Decimal("40"))]
@@ -41,23 +43,23 @@ def test_an_asset_kraken_does_not_list_is_refused(api, make_user, login):
     headers = login(make_user())
     _with_fiat(api, headers)
 
-    assert api.put("/assets/BTC", json={"target_pct": "10"}, headers=headers).status_code == 422
+    assert api.put("/api/assets/BTC", json={"target_pct": "10"}, headers=headers).status_code == 422
 
 
 def test_the_fiat_cannot_also_be_an_asset(api, make_user, login):
     headers = login(make_user())
     _with_fiat(api, headers)
 
-    assert api.put("/assets/EUR", json={"target_pct": "10"}, headers=headers).status_code == 422
+    assert api.put("/api/assets/EUR", json={"target_pct": "10"}, headers=headers).status_code == 422
 
 
 def test_weights_above_one_hundred_in_total_are_refused(api, db_session, make_user, login):
     user = make_user()
     headers = login(user)
     _with_fiat(api, headers)
-    api.put("/assets/XBT", json={"target_pct": "60"}, headers=headers)
+    api.put("/api/assets/XBT", json={"target_pct": "60"}, headers=headers)
 
-    response = api.put("/assets/ETH", json={"target_pct": "40.01"}, headers=headers)
+    response = api.put("/api/assets/ETH", json={"target_pct": "40.01"}, headers=headers)
 
     assert response.status_code == 422
     assert [row.asset for row in list_assets(db_session, user.id)] == ["XBT"]
@@ -66,16 +68,16 @@ def test_weights_above_one_hundred_in_total_are_refused(api, db_session, make_us
 def test_changing_one_weight_does_not_count_it_twice(api, make_user, login):
     headers = login(make_user())
     _with_fiat(api, headers)
-    api.put("/assets/XBT", json={"target_pct": "60"}, headers=headers)
+    api.put("/api/assets/XBT", json={"target_pct": "60"}, headers=headers)
 
-    assert api.put("/assets/XBT", json={"target_pct": "100"}, headers=headers).status_code == 200
+    assert api.put("/api/assets/XBT", json={"target_pct": "100"}, headers=headers).status_code == 200
 
 
 def test_a_weight_of_zero_is_accepted_because_it_means_exit(api, make_user, login):
     headers = login(make_user())
     _with_fiat(api, headers)
 
-    assert api.put("/assets/SOL", json={"target_pct": "0"}, headers=headers).status_code == 200
+    assert api.put("/api/assets/SOL", json={"target_pct": "0"}, headers=headers).status_code == 200
 
 
 def test_an_asset_with_no_pair_against_the_fiat_is_refused_now(api, make_user, login):
@@ -83,7 +85,7 @@ def test_an_asset_with_no_pair_against_the_fiat_is_refused_now(api, make_user, l
     headers = login(make_user())
     _with_fiat(api, headers, fiat="USD")
 
-    assert api.put("/assets/SOL", json={"target_pct": "10"}, headers=headers).status_code == 422
+    assert api.put("/api/assets/SOL", json={"target_pct": "10"}, headers=headers).status_code == 422
 
 
 def test_an_unreachable_kraken_stores_nothing(api, db_session, make_user, login, fake_kraken):
@@ -92,7 +94,7 @@ def test_an_unreachable_kraken_stores_nothing(api, db_session, make_user, login,
     _with_fiat(api, headers)
     fake_kraken.down.add("Assets")
 
-    assert api.put("/assets/XBT", json={"target_pct": "60"}, headers=headers).status_code == 503
+    assert api.put("/api/assets/XBT", json={"target_pct": "60"}, headers=headers).status_code == 503
     assert list_assets(db_session, user.id) == []
 
 
@@ -100,16 +102,16 @@ def test_a_weight_with_three_decimals_is_refused(api, make_user, login):
     headers = login(make_user())
     _with_fiat(api, headers)
 
-    assert api.put("/assets/XBT", json={"target_pct": "10.005"}, headers=headers).status_code == 422
+    assert api.put("/api/assets/XBT", json={"target_pct": "10.005"}, headers=headers).status_code == 422
 
 
 def test_the_list_carries_the_cash_target(api, make_user, login):
     headers = login(make_user())
     _with_fiat(api, headers)
-    api.put("/assets/XBT", json={"target_pct": "60"}, headers=headers)
-    api.put("/assets/SOL", json={"target_pct": "35"}, headers=headers)
+    api.put("/api/assets/XBT", json={"target_pct": "60"}, headers=headers)
+    api.put("/api/assets/SOL", json={"target_pct": "35"}, headers=headers)
 
-    body = api.get("/assets", headers=headers).json()
+    body = api.get("/api/assets", headers=headers).json()
 
     assert [row["asset"] for row in body["assets"]] == ["SOL", "XBT"]
     assert Decimal(body["cash_target_pct"]) == Decimal("5")
@@ -118,14 +120,14 @@ def test_the_list_carries_the_cash_target(api, make_user, login):
 def test_an_asset_can_be_removed_once(api, make_user, login):
     headers = login(make_user())
     _with_fiat(api, headers)
-    api.put("/assets/XBT", json={"target_pct": "60"}, headers=headers)
+    api.put("/api/assets/XBT", json={"target_pct": "60"}, headers=headers)
 
-    assert api.delete("/assets/xbt", headers=headers).status_code == 204
-    assert api.delete("/assets/XBT", headers=headers).status_code == 404
+    assert api.delete("/api/assets/xbt", headers=headers).status_code == 204
+    assert api.delete("/api/assets/XBT", headers=headers).status_code == 404
 
 
 def test_a_weight_without_a_fiat_is_refused_before_asking_kraken(api, make_user, login, fake_kraken):
-    api.put("/assets/XBT", json={"target_pct": "60"}, headers=login(make_user()))
+    api.put("/api/assets/XBT", json={"target_pct": "60"}, headers=login(make_user()))
 
     assert fake_kraken.calls == []
 
@@ -135,7 +137,7 @@ def test_asset_names_and_pairs_are_read_once_for_every_user(api, make_user, logi
     for _ in range(2):
         headers = login(make_user())
         _with_fiat(api, headers)
-        assert api.put("/assets/XBT", json={"target_pct": "60"}, headers=headers).status_code == 200
+        assert api.put("/api/assets/XBT", json={"target_pct": "60"}, headers=headers).status_code == 200
 
     assert fake_kraken.calls == ["Assets", "AssetPairs"]
 
@@ -144,9 +146,9 @@ def test_an_asset_is_removed_by_the_internal_name_it_was_set_with(api, db_sessio
     user = make_user()
     headers = login(user)
     _with_fiat(api, headers)
-    api.put("/assets/XXBT", json={"target_pct": "60"}, headers=headers)
+    api.put("/api/assets/XXBT", json={"target_pct": "60"}, headers=headers)
 
-    assert api.delete("/assets/XXBT", headers=headers).status_code == 204
+    assert api.delete("/api/assets/XXBT", headers=headers).status_code == 204
     assert list_assets(db_session, user.id) == []
 
 
@@ -159,7 +161,7 @@ def test_an_asset_is_removed_by_its_stored_name_when_kraken_is_down(
     upsert_asset(db_session, user.id, asset="XBT", pair="XXBTZEUR", target_pct=Decimal("60"))
     fake_kraken.down.add("Assets")
 
-    assert api.delete("/assets/xbt", headers=login(user)).status_code == 204
+    assert api.delete("/api/assets/xbt", headers=login(user)).status_code == 204
     assert list_assets(db_session, user.id) == []
 
 
@@ -168,10 +170,10 @@ def test_each_weight_shows_krakens_current_minimum(api, make_user, login):
     0.25, under it."""
     headers = login(make_user())
     _with_fiat(api, headers)
-    api.put("/assets/XBT", json={"target_pct": "60"}, headers=headers)
-    api.put("/assets/ETH", json={"target_pct": "40"}, headers=headers)
+    api.put("/api/assets/XBT", json={"target_pct": "60"}, headers=headers)
+    api.put("/api/assets/ETH", json={"target_pct": "40"}, headers=headers)
 
-    body = api.get("/assets", headers=headers).json()
+    body = api.get("/api/assets", headers=headers).json()
 
     minimums = {row["asset"]: row["kraken_min_fiat"] for row in body["assets"]}
     assert minimums == {"XBT": "5", "ETH": "0.5"}
@@ -180,10 +182,10 @@ def test_each_weight_shows_krakens_current_minimum(api, make_user, login):
 def test_the_weights_are_shown_even_when_prices_cannot_be_read(api, make_user, login, fake_kraken):
     headers = login(make_user())
     _with_fiat(api, headers)
-    api.put("/assets/XBT", json={"target_pct": "60"}, headers=headers)
+    api.put("/api/assets/XBT", json={"target_pct": "60"}, headers=headers)
     fake_kraken.down.add("Ticker")
 
-    response = api.get("/assets", headers=headers)
+    response = api.get("/api/assets", headers=headers)
 
     assert response.status_code == 200
     assert response.json()["assets"][0]["kraken_min_fiat"] is None

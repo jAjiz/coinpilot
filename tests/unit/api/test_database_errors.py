@@ -67,18 +67,18 @@ def _api(error: Exception) -> TestClient:
 
 @pytest.mark.parametrize("error", [UNREACHABLE, POOL_EXHAUSTED])
 def test_an_unreachable_database_is_a_503_the_client_may_retry(error):
-    response = _api(error).get("/auth/me")
+    response = _api(error).get("/api/auth/me")
 
     assert response.status_code == 503
     assert "database" in response.json()["detail"]
 
 
 def test_the_503_does_not_carry_the_drivers_message():
-    response = _api(UNREACHABLE).get("/auth/me")
+    response = _api(UNREACHABLE).get("/api/auth/me")
 
     assert "timeout" not in response.text
     assert "5432" not in response.text
 
 
 def test_an_error_the_database_answered_with_is_still_a_500():
-    assert _api(LOCK_REFUSED).get("/auth/me").status_code == 500
+    assert _api(LOCK_REFUSED).get("/api/auth/me").status_code == 500

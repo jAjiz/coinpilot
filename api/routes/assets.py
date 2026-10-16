@@ -57,7 +57,7 @@ def put_asset(asset: str, body: AssetIn, user: CurrentUser, session: Db, context
     # The fiat never changes once chosen, so reading it needs no lock.
     settings = db.get_settings(session, user.id)
     if settings is None:
-        raise HTTPException(409, "choose a fiat with PATCH /config first")
+        raise HTTPException(409, "choose a fiat with PATCH /api/config first")
 
     names = context.catalog.asset_names()
     if names is None:

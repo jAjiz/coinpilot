@@ -29,10 +29,10 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 PROVIDER = "google"
 LOGIN_COOKIE = "coinpilot_login"
-LOGIN_COOKIE_PATH = "/auth/callback"
+LOGIN_COOKIE_PATH = "/api/auth/callback"
 REFRESH_COOKIE = "coinpilot_refresh"
 # Sent to the auth routes only. `Strict`: a request another site starts never carries it.
-REFRESH_COOKIE_PATH = "/auth"
+REFRESH_COOKIE_PATH = "/api/auth"
 START_AGAIN = "the login expired or was not started here; start again"
 
 

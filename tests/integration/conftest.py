@@ -341,7 +341,7 @@ def app_context(
         google=GoogleConfig(
             client_id="test-client",
             client_secret="test-client-secret",
-            redirect_uri="http://testserver/auth/callback/google",
+            redirect_uri="http://testserver/api/auth/callback/google",
         ),
         credential_keys={1: bytes(range(32))},
         credential_key_version=1,

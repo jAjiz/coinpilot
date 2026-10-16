@@ -15,7 +15,7 @@ OTHER_SECRET = base64.b64encode(b"alice-second-secret").decode()
 
 
 def _register(api, headers, key=KEY, secret=SECRET):
-    return api.post("/credentials", json={"api_key": key, "api_secret": secret}, headers=headers)
+    return api.post("/api/credentials", json={"api_key": key, "api_secret": secret}, headers=headers)
 
 
 def test_an_accepted_key_is_stored_encrypted(api, db_session, make_user, login, app_context):
@@ -129,9 +129,9 @@ def test_a_refused_replacement_leaves_the_working_key_in_place(
 def test_the_status_says_whether_a_key_is_registered(api, make_user, login):
     headers = login(make_user())
 
-    assert api.get("/credentials/status", headers=headers).json()["registered"] is False
+    assert api.get("/api/credentials/status", headers=headers).json()["registered"] is False
     _register(api, headers)
-    status = api.get("/credentials/status", headers=headers).json()
+    status = api.get("/api/credentials/status", headers=headers).json()
     assert status["registered"] is True
     assert status["key_version"] == 1
     assert status["validated_at"].startswith("2026-09-29T12:00:00")
@@ -141,9 +141,9 @@ def test_a_key_can_be_deleted_once(api, make_user, login):
     headers = login(make_user())
     _register(api, headers)
 
-    assert api.delete("/credentials", headers=headers).status_code == 204
-    assert api.delete("/credentials", headers=headers).status_code == 404
-    assert api.get("/credentials/status", headers=headers).json()["registered"] is False
+    assert api.delete("/api/credentials", headers=headers).status_code == 204
+    assert api.delete("/api/credentials", headers=headers).status_code == 404
+    assert api.get("/api/credentials/status", headers=headers).json()["registered"] is False
 
 
 def test_registering_needs_a_signed_in_user(api):
@@ -154,8 +154,8 @@ def test_a_malformed_body_is_refused_without_echoing_it(api, make_user, login):
     """FastAPI's default 422 carries the rejected input. Here that input is a credential."""
     headers = login(make_user())
 
-    missing_secret = api.post("/credentials", json={"api_key": KEY}, headers=headers)
-    too_long = api.post("/credentials", json={"api_key": KEY, "api_secret": "x" * 600}, headers=headers)
+    missing_secret = api.post("/api/credentials", json={"api_key": KEY}, headers=headers)
+    too_long = api.post("/api/credentials", json={"api_key": KEY, "api_secret": "x" * 600}, headers=headers)
 
     assert missing_secret.status_code == 422
     assert KEY not in missing_secret.text

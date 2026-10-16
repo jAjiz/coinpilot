@@ -30,45 +30,45 @@ def bob(make_user):
 @pytest.fixture
 def alice_ready(api, login, alice, fake_kraken):
     headers = login(alice)
-    api.patch("/config", json={"fiat": "EUR"}, headers=headers)
-    api.put("/assets/XBT", json={"target_pct": "60"}, headers=headers)
-    api.post("/credentials", json={"api_key": "ALICE-KEY", "api_secret": SECRET}, headers=headers)
+    api.patch("/api/config", json={"fiat": "EUR"}, headers=headers)
+    api.put("/api/assets/XBT", json={"target_pct": "60"}, headers=headers)
+    api.post("/api/credentials", json={"api_key": "ALICE-KEY", "api_secret": SECRET}, headers=headers)
     fake_kraken.balance = {"ZEUR": "100"}
-    api.post("/portfolio/refresh", headers=headers)
+    api.post("/api/portfolio/refresh", headers=headers)
     return headers
 
 
 def test_settings_are_not_shared(api, login, bob, alice_ready):
-    assert api.get("/config", headers=login(bob)).status_code == 404
+    assert api.get("/api/config", headers=login(bob)).status_code == 404
 
 
 def test_weights_are_not_shared(api, login, bob, alice_ready):
-    assert api.get("/assets", headers=login(bob)).json()["assets"] == []
+    assert api.get("/api/assets", headers=login(bob)).json()["assets"] == []
 
 
 def test_deleting_a_weight_touches_only_ones_own(api, db_session, login, alice, bob, alice_ready):
-    assert api.delete("/assets/XBT", headers=login(bob)).status_code == 404
+    assert api.delete("/api/assets/XBT", headers=login(bob)).status_code == 404
     assert [row.asset for row in list_assets(db_session, alice.id)] == ["XBT"]
 
 
 def test_a_key_is_not_shared(api, login, bob, alice_ready):
-    assert api.get("/credentials/status", headers=login(bob)).json()["registered"] is False
+    assert api.get("/api/credentials/status", headers=login(bob)).json()["registered"] is False
 
 
 def test_deleting_a_key_touches_only_ones_own(api, login, bob, alice_ready):
-    assert api.delete("/credentials", headers=login(bob)).status_code == 404
-    assert api.get("/credentials/status", headers=alice_ready).json()["registered"] is True
+    assert api.delete("/api/credentials", headers=login(bob)).status_code == 404
+    assert api.get("/api/credentials/status", headers=alice_ready).json()["registered"] is True
 
 
 def test_a_refresh_never_borrows_another_users_key(api, login, bob):
     headers = login(bob)
-    api.patch("/config", json={"fiat": "EUR"}, headers=headers)
+    api.patch("/api/config", json={"fiat": "EUR"}, headers=headers)
 
-    assert api.post("/portfolio/refresh", headers=headers).status_code == 409
+    assert api.post("/api/portfolio/refresh", headers=headers).status_code == 409
 
 
 def test_a_snapshot_is_not_shared(api, login, bob, alice_ready):
-    assert api.get("/portfolio", headers=login(bob)).status_code == 404
+    assert api.get("/api/portfolio", headers=login(bob)).status_code == 404
 
 
 def test_orders_are_not_shared(api, db_session, login, alice, bob):
@@ -83,12 +83,12 @@ def test_orders_are_not_shared(api, db_session, login, alice, bob):
         requested_fiat=Decimal("10"),
     )
 
-    assert api.get("/orders", headers=login(bob)).json() == []
+    assert api.get("/api/orders", headers=login(bob)).json() == []
 
 
 def test_investing_never_borrows_another_users_key(api, login, bob, alice_ready, fake_kraken):
     """Bob has no key of his own. Alice's must not be the one that answers."""
-    response = api.post("/invest", headers=login(bob))
+    response = api.post("/api/invest", headers=login(bob))
 
     assert response.status_code == 409
     assert fake_kraken.placed == []
@@ -96,9 +96,9 @@ def test_investing_never_borrows_another_users_key(api, login, bob, alice_ready,
 
 def test_a_proposal_is_not_shared(api, login, bob, alice_ready, fake_kraken):
     fake_kraken.balance = {"ZEUR": "100", "XXBT": "0.01"}
-    assert api.post("/rebalance", headers=alice_ready).status_code == 200
+    assert api.post("/api/rebalance", headers=alice_ready).status_code == 200
 
-    assert api.get("/proposal", headers=login(bob)).status_code == 404
-    assert api.post("/proposal/approve", json={"version": 1}, headers=login(bob)).status_code == 404
-    assert api.delete("/proposal", headers=login(bob)).status_code == 404
-    assert api.get("/proposal", headers=alice_ready).json()["version"] == 1
+    assert api.get("/api/proposal", headers=login(bob)).status_code == 404
+    assert api.post("/api/proposal/approve", json={"version": 1}, headers=login(bob)).status_code == 404
+    assert api.delete("/api/proposal", headers=login(bob)).status_code == 404
+    assert api.get("/api/proposal", headers=alice_ready).json()["version"] == 1

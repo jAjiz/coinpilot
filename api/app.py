@@ -19,6 +19,10 @@ from core.scheduler import Scheduler
 
 logger = logging.getLogger("coinpilot.api")
 
+# Every route of the API answers under it; every other path is the application (application
+# spec §2.1).
+API_PREFIX = "/api"
+
 DATABASE_DOWN = "the database cannot be reached right now; try again in a moment"
 
 
@@ -71,7 +75,14 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 def create_app(context: AppContext) -> FastAPI:
-    app = FastAPI(title="CoinPilot", version="0.1.0", lifespan=_lifespan)
+    app = FastAPI(
+        title="CoinPilot",
+        version="0.1.0",
+        lifespan=_lifespan,
+        docs_url=f"{API_PREFIX}/docs",
+        openapi_url=f"{API_PREFIX}/openapi.json",
+        redoc_url=None,
+    )
     app.state.context = context
     app.add_exception_handler(RequestValidationError, _validation_error)
     app.add_exception_handler(OperationalError, _database_error)
@@ -87,5 +98,5 @@ def create_app(context: AppContext) -> FastAPI:
         proposal.router,
         history.router,
     ):
-        app.include_router(router)
+        app.include_router(router, prefix=API_PREFIX)
     return app

@@ -33,7 +33,7 @@ def _out(snapshot: PortfolioSnapshot) -> PortfolioOut:
 def read(user: CurrentUser, session: Db) -> PortfolioOut:
     snapshot = db.latest_snapshot(session, user.id)
     if snapshot is None:
-        raise HTTPException(404, "no snapshot yet; POST /portfolio/refresh to take one")
+        raise HTTPException(404, "no snapshot yet; POST /api/portfolio/refresh to take one")
     return _out(snapshot)
 
 
@@ -41,10 +41,10 @@ def read(user: CurrentUser, session: Db) -> PortfolioOut:
 def refresh(user: CurrentUser, session: Db, context: Ctx) -> PortfolioOut:
     settings = db.get_settings(session, user.id)
     if settings is None:
-        raise HTTPException(409, "choose a fiat with PATCH /config first")
+        raise HTTPException(409, "choose a fiat with PATCH /api/config first")
     record = db.get_credentials(session, user.id)
     if record is None:
-        raise HTTPException(409, "register a Kraken key with POST /credentials first")
+        raise HTTPException(409, "register a Kraken key with POST /api/credentials first")
 
     try:
         credentials = context.cipher.unseal(
