@@ -158,6 +158,19 @@ class AssetsOut(BaseModel):
     cash_target_pct: Decimal
 
 
+class HoldingOut(BaseModel):
+    """One asset of a snapshot. Every amount a decimal string, or null when it has none."""
+
+    asset: str
+    amount: str | None
+    price: str | None
+    value: str | None
+    managed: bool
+    locked: bool
+    target_pct: str | None
+    weight_pct: str | None
+
+
 class PortfolioOut(BaseModel):
     as_of: datetime
     fiat: str
@@ -165,7 +178,11 @@ class PortfolioOut(BaseModel):
     # written like the amounts inside `holdings`.
     total_value: str
     cash: str
-    holdings: dict[str, object]
+    # Null on a snapshot written before they were recorded.
+    cash_target_pct: str | None
+    cash_weight_pct: str | None
+    # Managed first, then unmanaged, then locked; by asset within each.
+    holdings: list[HoldingOut]
 
 
 class OrderOut(BaseModel):

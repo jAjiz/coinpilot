@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from core.db.orders import record_attempt
-from core.db.telemetry import latest_snapshot, snapshots_since, start_evaluation
+from core.db.telemetry import keep_snapshot, latest_snapshot, snapshots_since, start_evaluation
 from core.db.types import OrderReason
 from core.db.users import get_credentials
 from engine.types import Side
@@ -46,10 +46,11 @@ def test_a_refresh_values_the_real_account_and_records_it(api, db_session, make_
     body = response.json()
     assert Decimal(body["total_value"]) == Decimal("2000")
     assert Decimal(body["cash"]) == Decimal("1000")
-    assets = body["holdings"]["assets"]
+    assets = {holding["asset"]: holding for holding in body["holdings"]}
     assert assets["XBT"]["weight_pct"] == "50.00"
     assert assets["DOT.S"]["locked"] is True
     assert "ETH" not in assets
+    assert body["cash_weight_pct"] == "50.00"
     assert body["as_of"].startswith("2026-09-29T12:00:00")
     assert latest_snapshot(db_session, user.id) is not None
 
@@ -168,3 +169,61 @@ def test_refreshes_of_the_same_day_keep_one_point(
     api.post("/api/portfolio/refresh", headers=headers)
 
     assert len(snapshots_since(db_session, user.id, app_context.now() - timedelta(days=1))) == 1
+
+
+def _holding(*, managed=True, locked=False):
+    return {
+        "amount": "1",
+        "price": "10",
+        "value": "10",
+        "managed": managed,
+        "locked": locked,
+        "target_pct": "10.00" if managed else None,
+        "weight_pct": "10.00" if managed else None,
+    }
+
+
+def test_a_snapshot_without_cash_percentages_still_reads(api, db_session, make_user, login):
+    """Written before the cash percentages were part of a snapshot's JSON."""
+    user = make_user()
+    keep_snapshot(
+        db_session,
+        user.id,
+        as_of=datetime(2026, 9, 1, tzinfo=UTC),
+        fiat="EUR",
+        total_value=Decimal("10"),
+        cash=Decimal("0"),
+        holdings={"assets": {"BTC": _holding()}},
+    )
+
+    body = api.get("/api/portfolio", headers=login(user)).json()
+
+    assert body["cash_target_pct"] is None and body["cash_weight_pct"] is None
+    assert body["holdings"][0]["asset"] == "BTC"
+
+
+def test_holdings_are_listed_managed_then_unmanaged_then_locked(api, db_session, make_user, login):
+    """JSONB keeps no key order, so the order is the API's, whatever order they were written in."""
+    user = make_user()
+    keep_snapshot(
+        db_session,
+        user.id,
+        as_of=datetime(2026, 9, 1, tzinfo=UTC),
+        fiat="EUR",
+        total_value=Decimal("20"),
+        cash=Decimal("0"),
+        holdings={
+            "cash_target_pct": "80.00",
+            "cash_weight_pct": "0.00",
+            "assets": {
+                "DOT.S": _holding(managed=False, locked=True),
+                "XRP": _holding(managed=False),
+                "SOL": _holding(),
+                "BTC": _holding(),
+            },
+        },
+    )
+
+    body = api.get("/api/portfolio", headers=login(user)).json()
+
+    assert [holding["asset"] for holding in body["holdings"]] == ["BTC", "SOL", "XRP", "DOT.S"]
