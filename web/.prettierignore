@@ -1,0 +1,7 @@
+dist
+coverage
+src/api/schema.d.ts
+openapi.json
+src/components/ui
+playwright-report
+test-results
