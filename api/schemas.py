@@ -10,6 +10,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, SecretStr, model_validator
 
@@ -97,6 +98,7 @@ class ConfigOut(BaseModel):
     next_invest_at: datetime | None
     next_rebalance_at: datetime | None
     paused: bool
+    onboarded_at: datetime | None
 
 
 class ConfigPatch(BaseModel):
@@ -121,6 +123,8 @@ class ConfigPatch(BaseModel):
     rebalance_interval_days: int | None = Field(default=None, ge=0, le=3650)
     rebalance_interval_months: int | None = Field(default=None, ge=0, le=120)
     rebalance_cadence_anchor: AwareDatetime | None = None
+    # Only `true`: onboarding, once finished, is not undone. A time already set stays.
+    onboarded: Literal[True] | None = None
 
     @model_validator(mode="after")
     def _no_null_for_required(self) -> ConfigPatch:
@@ -154,6 +158,19 @@ class AssetsOut(BaseModel):
     cash_target_pct: Decimal
 
 
+class HoldingOut(BaseModel):
+    """One asset of a snapshot. Every amount a decimal string, or null when it has none."""
+
+    asset: str
+    amount: str | None
+    price: str | None
+    value: str | None
+    managed: bool
+    locked: bool
+    target_pct: str | None
+    weight_pct: str | None
+
+
 class PortfolioOut(BaseModel):
     as_of: datetime
     fiat: str
@@ -161,7 +178,11 @@ class PortfolioOut(BaseModel):
     # written like the amounts inside `holdings`.
     total_value: str
     cash: str
-    holdings: dict[str, object]
+    # Null on a snapshot written before they were recorded.
+    cash_target_pct: str | None
+    cash_weight_pct: str | None
+    # Managed first, then unmanaged, then locked; by asset within each.
+    holdings: list[HoldingOut]
 
 
 class OrderOut(BaseModel):

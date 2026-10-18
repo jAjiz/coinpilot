@@ -596,6 +596,8 @@ and amounts read with the user's key.
 
 ## 11. API surface
 
+Every path is under the `/api` prefix (application spec §2.1).
+
 | Endpoint | Purpose |
 |---|---|
 | `GET /health` | Liveness |

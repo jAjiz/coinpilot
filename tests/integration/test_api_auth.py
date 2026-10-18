@@ -1,5 +1,5 @@
 import uuid
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from sqlalchemy import func, select
 
@@ -11,28 +11,45 @@ from core.tokens import hash_refresh_token
 
 
 def _start_login(api):
-    response = api.get("/auth/login/google", follow_redirects=False)
+    response = api.get("/api/auth/login/google", follow_redirects=False)
     assert response.status_code == 302
     return parse_qs(urlparse(response.headers["location"]).query)
 
 
+def _callback(api, params):
+    return api.get("/api/auth/callback/google", params=params, follow_redirects=False)
+
+
 def _finish_login(api, query, code="the-code"):
-    return api.get("/auth/callback/google", params={"code": code, "state": query["state"][0]})
+    return _callback(api, {"code": code, "state": query["state"][0]})
 
 
 def _sign_in(api):
     response = _finish_login(api, _start_login(api))
-    assert response.status_code == 200
-    return response.json()
+    assert response.status_code == 302 and response.headers["location"] == "/"
+    return {"access_token": api.cookies["coinpilot_token"], "refresh_token": api.cookies["coinpilot_refresh"]}
+
+
+def _refused_with(api, response):
+    """The reason the callback sent the browser back to the login page with.
+
+    A refusal leaves no cookie of the sign-in behind: neither a session nor the login.
+    """
+    assert response.status_code == 302
+    location = response.headers["location"]
+    assert location.startswith("/login?error=")
+    for name in ("coinpilot_token", "coinpilot_refresh", "coinpilot_login"):
+        assert api.cookies.get(name) is None, name
+    return unquote(location.removeprefix("/login?error="))
 
 
 def _refresh(api, token=None):
     """With no token, the browser path: the refresh cookie alone."""
-    return api.post("/auth/refresh", json=None if token is None else {"refresh_token": token})
+    return api.post("/api/auth/refresh", json=None if token is None else {"refresh_token": token})
 
 
 def test_health_needs_no_login(api):
-    assert api.get("/health").json() == {"status": "ok"}
+    assert api.get("/api/health").json() == {"status": "ok"}
 
 
 def test_login_redirects_to_google_with_pkce_and_remembers_the_state(api):
@@ -43,23 +60,18 @@ def test_login_redirects_to_google_with_pkce_and_remembers_the_state(api):
 
 
 def test_an_unknown_provider_is_not_found(api):
-    assert api.get("/auth/login/github", follow_redirects=False).status_code == 404
+    assert api.get("/api/auth/login/github", follow_redirects=False).status_code == 404
 
 
-def test_a_completed_login_creates_the_user_and_returns_both_tokens(
-    api, db_session, fake_google, app_context
-):
-    body = _sign_in(api)
+def test_a_completed_login_creates_the_user_and_sets_both_cookies(api, db_session, fake_google, app_context):
+    cookies = _sign_in(api)
 
     user = get_user_by_identity(db_session, "google", fake_google.subject)
     assert user.email == fake_google.email
-    assert app_context.signer.verify(body["access_token"]) == user.id
-    assert body["token_type"] == "bearer"
-    assert body["refresh_expires_at"].startswith("2026-10-29T12:00:00")
+    assert app_context.signer.verify(cookies["access_token"]) == user.id
     stored = db_session.execute(select(RefreshToken).where(RefreshToken.user_id == user.id)).scalar_one()
-    assert stored.token_hash == hash_refresh_token(body["refresh_token"])
-    assert api.cookies.get("coinpilot_token") == body["access_token"]
-    assert api.cookies.get("coinpilot_refresh") == body["refresh_token"]
+    assert stored.token_hash == hash_refresh_token(cookies["refresh_token"])
+    assert api.cookies.get("coinpilot_login") is None
 
 
 def test_the_verifier_sent_to_google_matches_the_challenge(api, fake_google):
@@ -81,32 +93,36 @@ def test_a_state_that_does_not_match_is_refused(api, db_session, fake_google):
     """The state is what stops someone else's code being planted in this browser."""
     _start_login(api)
 
-    response = api.get("/auth/callback/google", params={"code": "c", "state": "forged"})
+    response = _callback(api, {"code": "c", "state": "forged"})
 
-    assert response.status_code == 400
+    assert _refused_with(api, response) == "the login state does not match; start again"
     assert get_user_by_identity(db_session, "google", fake_google.subject) is None
 
 
 def test_a_callback_with_no_login_started_is_refused(api):
-    assert api.get("/auth/callback/google", params={"code": "c", "state": "s"}).status_code == 400
+    response = _callback(api, {"code": "c", "state": "s"})
+
+    assert _refused_with(api, response) == "the login expired or was not started here; start again"
 
 
 def test_a_login_google_did_not_grant_is_refused(api):
     _start_login(api)
 
-    assert api.get("/auth/callback/google", params={"error": "access_denied"}).status_code == 400
+    response = _callback(api, {"error": "access_denied"})
+
+    assert _refused_with(api, response) == "google did not grant the login"
 
 
 def test_a_code_google_refuses_is_refused(api, fake_google):
     fake_google.refuse_code = True
 
-    assert _finish_login(api, _start_login(api)).status_code == 400
+    assert _refused_with(api, _finish_login(api, _start_login(api)))
 
 
 def test_an_unverified_google_email_is_refused(api, db_session, fake_google):
     fake_google.email_verified = False
 
-    assert _finish_login(api, _start_login(api)).status_code == 400
+    assert _refused_with(api, _finish_login(api, _start_login(api)))
     assert get_user_by_identity(db_session, "google", fake_google.subject) is None
 
 
@@ -118,7 +134,8 @@ def test_a_refresh_returns_a_new_pair_for_the_same_user(api, app_context):
     assert response.status_code == 200
     renewed = response.json()
     assert renewed["refresh_token"] != signed_in["refresh_token"]
-    assert renewed["refresh_expires_at"] == signed_in["refresh_expires_at"]
+    # The sign-in's absolute expiry, FIXED_NOW plus the 30 days of `refresh_ttl`, not a fresh one.
+    assert renewed["refresh_expires_at"].startswith("2026-10-29T12:00:00")
     assert app_context.signer.verify(renewed["access_token"]) == app_context.signer.verify(
         signed_in["access_token"]
     )
@@ -163,7 +180,7 @@ def test_a_disabled_user_cannot_refresh_and_the_sign_in_is_ended(api, db_session
 def test_me_answers_to_a_bearer_token(api, make_user, login):
     user = make_user(email="alice@example.test")
 
-    response = api.get("/auth/me", headers=login(user))
+    response = api.get("/api/auth/me", headers=login(user))
 
     assert response.status_code == 200
     assert response.json()["email"] == "alice@example.test"
@@ -173,21 +190,21 @@ def test_me_answers_to_a_bearer_token(api, make_user, login):
 def test_me_answers_to_the_cookie_a_login_left(api):
     _sign_in(api)
 
-    assert api.get("/auth/me").status_code == 200
+    assert api.get("/api/auth/me").status_code == 200
 
 
 def test_no_token_is_401(api):
-    assert api.get("/auth/me").status_code == 401
+    assert api.get("/api/auth/me").status_code == 401
 
 
 def test_a_token_that_does_not_verify_is_401(api):
-    assert api.get("/auth/me", headers={"Authorization": "Bearer not-a-token"}).status_code == 401
+    assert api.get("/api/auth/me", headers={"Authorization": "Bearer not-a-token"}).status_code == 401
 
 
 def test_a_token_for_a_user_that_does_not_exist_is_401(api, app_context):
     token = app_context.signer.issue(uuid.uuid4()).value
 
-    assert api.get("/auth/me", headers={"Authorization": f"Bearer {token}"}).status_code == 401
+    assert api.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"}).status_code == 401
 
 
 def test_a_disabled_user_with_a_valid_access_token_is_refused(api, db_session, make_user, login):
@@ -196,20 +213,23 @@ def test_a_disabled_user_with_a_valid_access_token_is_refused(api, db_session, m
     headers = login(user)
     set_user_status(db_session, user.id, UserStatus.DISABLED)
 
-    assert api.get("/auth/me", headers=headers).status_code == 403
+    assert api.get("/api/auth/me", headers=headers).status_code == 403
 
 
 def test_a_disabled_user_cannot_sign_in_again(api, db_session, fake_google):
     user = create_user(db_session, provider="google", subject=fake_google.subject, email=fake_google.email)
     set_user_status(db_session, user.id, UserStatus.DISABLED)
 
-    assert _finish_login(api, _start_login(api)).status_code == 403
+    response = _finish_login(api, _start_login(api))
+
+    assert response.headers["location"] == "/login?error=this%20account%20is%20disabled"
+    assert _refused_with(api, response) == "this account is disabled"
 
 
 def test_logout_revokes_the_refresh_token_and_removes_both_cookies(api):
     token = _sign_in(api)["refresh_token"]
 
-    assert api.post("/auth/logout").status_code == 204
+    assert api.post("/api/auth/logout").status_code == 204
 
     assert api.cookies.get("coinpilot_token") is None
     assert api.cookies.get("coinpilot_refresh") is None
@@ -220,7 +240,7 @@ def test_an_application_logs_out_with_the_token_in_the_body(api):
     token = _sign_in(api)["refresh_token"]
     api.cookies.clear()
 
-    assert api.post("/auth/logout", json={"refresh_token": token}).status_code == 204
+    assert api.post("/api/auth/logout", json={"refresh_token": token}).status_code == 204
     assert _refresh(api, token).status_code == 401
 
 
@@ -228,6 +248,6 @@ def test_an_access_token_outlives_logout_only_by_its_own_short_life(api):
     """Pinned on purpose. An access token is never looked up, so logout cannot reach it;
     its lifetime, 15 minutes by default, is the bound (spec §15)."""
     access = _sign_in(api)["access_token"]
-    api.post("/auth/logout")
+    api.post("/api/auth/logout")
 
-    assert api.get("/auth/me", headers={"Authorization": f"Bearer {access}"}).status_code == 200
+    assert api.get("/api/auth/me", headers={"Authorization": f"Bearer {access}"}).status_code == 200

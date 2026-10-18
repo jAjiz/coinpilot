@@ -6,15 +6,15 @@ from core.db.settings import get_settings, update_settings
 
 
 def test_there_are_no_settings_until_the_first_patch(api, make_user, login):
-    assert api.get("/config", headers=login(make_user())).status_code == 404
+    assert api.get("/api/config", headers=login(make_user())).status_code == 404
 
 
 def test_the_first_patch_must_choose_the_fiat(api, make_user, login):
-    assert api.patch("/config", json={"paused": True}, headers=login(make_user())).status_code == 409
+    assert api.patch("/api/config", json={"paused": True}, headers=login(make_user())).status_code == 409
 
 
 def test_the_first_patch_creates_the_settings_with_their_defaults(api, make_user, login):
-    response = api.patch("/config", json={"fiat": "eur"}, headers=login(make_user()))
+    response = api.patch("/api/config", json={"fiat": "eur"}, headers=login(make_user()))
 
     assert response.status_code == 200
     body = response.json()
@@ -25,22 +25,24 @@ def test_the_first_patch_creates_the_settings_with_their_defaults(api, make_user
 
 
 def test_a_fiat_this_system_does_not_support_is_refused(api, make_user, login):
-    assert api.patch("/config", json={"fiat": "BTC"}, headers=login(make_user())).status_code == 422
+    assert api.patch("/api/config", json={"fiat": "BTC"}, headers=login(make_user())).status_code == 422
 
 
 def test_the_fiat_cannot_change_once_chosen(api, make_user, login):
     headers = login(make_user())
-    api.patch("/config", json={"fiat": "EUR"}, headers=headers)
+    api.patch("/api/config", json={"fiat": "EUR"}, headers=headers)
 
-    assert api.patch("/config", json={"fiat": "USD"}, headers=headers).status_code == 422
-    assert api.patch("/config", json={"fiat": "EUR", "paused": True}, headers=headers).status_code == 200
+    assert api.patch("/api/config", json={"fiat": "USD"}, headers=headers).status_code == 422
+    assert api.patch("/api/config", json={"fiat": "EUR", "paused": True}, headers=headers).status_code == 200
 
 
 def test_amounts_come_back_as_strings(api, make_user, login):
     headers = login(make_user())
-    api.patch("/config", json={"fiat": "EUR"}, headers=headers)
+    api.patch("/api/config", json={"fiat": "EUR"}, headers=headers)
 
-    body = api.patch("/config", json={"min_drift_pct": "5.5", "min_order_fiat": "10"}, headers=headers).json()
+    body = api.patch(
+        "/api/config", json={"min_drift_pct": "5.5", "min_order_fiat": "10"}, headers=headers
+    ).json()
 
     assert isinstance(body["min_drift_pct"], str)
     assert Decimal(body["min_drift_pct"]) == Decimal("5.5")
@@ -49,23 +51,23 @@ def test_amounts_come_back_as_strings(api, make_user, login):
 
 def test_a_drift_threshold_the_column_cannot_hold_is_refused(api, make_user, login):
     headers = login(make_user())
-    api.patch("/config", json={"fiat": "EUR"}, headers=headers)
+    api.patch("/api/config", json={"fiat": "EUR"}, headers=headers)
 
-    assert api.patch("/config", json={"min_drift_pct": "5.55"}, headers=headers).status_code == 422
-    assert api.patch("/config", json={"min_drift_pct": "101"}, headers=headers).status_code == 422
-    assert api.patch("/config", json={"min_order_fiat": "-1"}, headers=headers).status_code == 422
+    assert api.patch("/api/config", json={"min_drift_pct": "5.55"}, headers=headers).status_code == 422
+    assert api.patch("/api/config", json={"min_drift_pct": "101"}, headers=headers).status_code == 422
+    assert api.patch("/api/config", json={"min_order_fiat": "-1"}, headers=headers).status_code == 422
 
 
 def test_an_interval_cadence_needs_a_length_and_an_anchor(api, db_session, make_user, login):
     user = make_user()
     headers = login(user)
-    api.patch("/config", json={"fiat": "EUR"}, headers=headers)
+    api.patch("/api/config", json={"fiat": "EUR"}, headers=headers)
 
     no_anchor = api.patch(
-        "/config", json={"invest_cadence_mode": "INTERVAL", "invest_interval_months": 1}, headers=headers
+        "/api/config", json={"invest_cadence_mode": "INTERVAL", "invest_interval_months": 1}, headers=headers
     )
     no_length = api.patch(
-        "/config",
+        "/api/config",
         json={"invest_cadence_mode": "INTERVAL", "invest_cadence_anchor": "2026-10-01T09:00:00+00:00"},
         headers=headers,
     )
@@ -77,10 +79,10 @@ def test_an_interval_cadence_needs_a_length_and_an_anchor(api, db_session, make_
 
 def test_a_complete_interval_cadence_is_accepted(api, make_user, login):
     headers = login(make_user())
-    api.patch("/config", json={"fiat": "EUR"}, headers=headers)
+    api.patch("/api/config", json={"fiat": "EUR"}, headers=headers)
 
     response = api.patch(
-        "/config",
+        "/api/config",
         json={
             "rebalance_cadence_mode": "INTERVAL",
             "rebalance_interval_months": 3,
@@ -95,25 +97,27 @@ def test_a_complete_interval_cadence_is_accepted(api, make_user, login):
 
 def test_an_anchor_without_a_timezone_is_refused(api, make_user, login):
     headers = login(make_user())
-    api.patch("/config", json={"fiat": "EUR"}, headers=headers)
+    api.patch("/api/config", json={"fiat": "EUR"}, headers=headers)
 
-    response = api.patch("/config", json={"invest_cadence_anchor": "2026-10-01T09:00:00"}, headers=headers)
+    response = api.patch(
+        "/api/config", json={"invest_cadence_anchor": "2026-10-01T09:00:00"}, headers=headers
+    )
 
     assert response.status_code == 422
 
 
 def test_a_required_setting_cannot_be_set_to_null(api, make_user, login):
     headers = login(make_user())
-    api.patch("/config", json={"fiat": "EUR"}, headers=headers)
+    api.patch("/api/config", json={"fiat": "EUR"}, headers=headers)
 
-    assert api.patch("/config", json={"paused": None}, headers=headers).status_code == 422
+    assert api.patch("/api/config", json={"paused": None}, headers=headers).status_code == 422
 
 
 def test_the_times_the_scheduler_owns_cannot_be_patched(api, make_user, login):
     headers = login(make_user())
-    api.patch("/config", json={"fiat": "EUR"}, headers=headers)
+    api.patch("/api/config", json={"fiat": "EUR"}, headers=headers)
 
-    response = api.patch("/config", json={"next_invest_at": "2026-10-01T09:00:00+00:00"}, headers=headers)
+    response = api.patch("/api/config", json={"next_invest_at": "2026-10-01T09:00:00+00:00"}, headers=headers)
 
     assert response.status_code == 422
 
@@ -123,7 +127,7 @@ def test_new_settings_look_for_drift_on_the_minimum_cadence_and_do_not_invest(
 ):
     user = make_user()
 
-    api.patch("/config", json={"fiat": "EUR"}, headers=login(user))
+    api.patch("/api/config", json={"fiat": "EUR"}, headers=login(user))
 
     settings = get_settings(db_session, user.id)
     assert settings.next_invest_at is None
@@ -133,12 +137,12 @@ def test_new_settings_look_for_drift_on_the_minimum_cadence_and_do_not_invest(
 def test_turning_investment_on_schedules_it_and_off_clears_it(api, app_context, db_session, make_user, login):
     user = make_user()
     headers = login(user)
-    api.patch("/config", json={"fiat": "EUR"}, headers=headers)
+    api.patch("/api/config", json={"fiat": "EUR"}, headers=headers)
 
-    api.patch("/config", json={"invest_cash_enabled": True}, headers=headers)
+    api.patch("/api/config", json={"invest_cash_enabled": True}, headers=headers)
     assert app_context.now() < get_settings(db_session, user.id).next_invest_at
 
-    api.patch("/config", json={"invest_cash_enabled": False}, headers=headers)
+    api.patch("/api/config", json={"invest_cash_enabled": False}, headers=headers)
     assert get_settings(db_session, user.id).next_invest_at is None
 
 
@@ -146,10 +150,10 @@ def test_a_new_cadence_moves_its_next_run(api, db_session, make_user, login):
     """The clock is 2026-09-29 12:00: monthly from 1 January at 09:00 is next on 1 October."""
     user = make_user()
     headers = login(user)
-    api.patch("/config", json={"fiat": "EUR"}, headers=headers)
+    api.patch("/api/config", json={"fiat": "EUR"}, headers=headers)
 
     api.patch(
-        "/config",
+        "/api/config",
         json={
             "rebalance_cadence_mode": "INTERVAL",
             "rebalance_interval_months": 1,
@@ -171,11 +175,13 @@ def test_unpausing_waits_for_the_next_slot_instead_of_running_at_once(
     pause must not make them due on the next tick, off their cadence."""
     user = make_user()
     headers = login(user)
-    api.patch("/config", json={"fiat": "EUR", "invest_cash_enabled": True, "paused": True}, headers=headers)
+    api.patch(
+        "/api/config", json={"fiat": "EUR", "invest_cash_enabled": True, "paused": True}, headers=headers
+    )
     missed = app_context.now() - timedelta(days=10)
     update_settings(db_session, user.id, next_invest_at=missed, next_rebalance_at=missed)
 
-    api.patch("/config", json={"paused": False}, headers=headers)
+    api.patch("/api/config", json={"paused": False}, headers=headers)
 
     settings = get_settings(db_session, user.id)
     assert settings.next_invest_at > app_context.now()
@@ -185,10 +191,56 @@ def test_unpausing_waits_for_the_next_slot_instead_of_running_at_once(
 def test_a_change_to_anything_else_leaves_the_schedule_alone(api, db_session, make_user, login):
     user = make_user()
     headers = login(user)
-    api.patch("/config", json={"fiat": "EUR"}, headers=headers)
+    api.patch("/api/config", json={"fiat": "EUR"}, headers=headers)
     planned = datetime(2026, 10, 3, 9, 0, tzinfo=UTC)
     update_settings(db_session, user.id, next_rebalance_at=planned)
 
-    api.patch("/config", json={"min_drift_pct": "5"}, headers=headers)
+    api.patch("/api/config", json={"min_drift_pct": "5"}, headers=headers)
 
     assert get_settings(db_session, user.id).next_rebalance_at == planned
+
+
+def test_onboarding_is_not_finished_on_a_new_user(api, make_user, login):
+    body = api.patch("/api/config", json={"fiat": "EUR"}, headers=login(make_user())).json()
+
+    assert body["onboarded_at"] is None
+
+
+def test_onboarded_records_the_time_once(api, make_user, login):
+    headers = login(make_user())
+    api.patch("/api/config", json={"fiat": "EUR"}, headers=headers)
+
+    first = api.patch("/api/config", json={"onboarded": True}, headers=headers).json()
+    assert first["onboarded_at"].startswith("2026-09-29T12:00:00")  # FIXED_NOW in conftest
+
+    again = api.patch("/api/config", json={"onboarded": True}, headers=headers).json()
+    assert again["onboarded_at"] == first["onboarded_at"]
+
+
+def test_onboarded_false_is_refused(api, make_user, login):
+    headers = login(make_user())
+    api.patch("/api/config", json={"fiat": "EUR"}, headers=headers)
+
+    assert api.patch("/api/config", json={"onboarded": False}, headers=headers).status_code == 422
+
+
+def test_onboarded_does_not_move_the_next_runs(api, db_session, make_user, login):
+    user = make_user()
+    headers = login(user)
+    api.patch(
+        "/api/config",
+        json={
+            "fiat": "EUR",
+            "invest_cadence_mode": "INTERVAL",
+            "invest_interval_days": 7,
+            "invest_cadence_anchor": "2026-01-05T12:00:00Z",
+        },
+        headers=headers,
+    )
+    planned = datetime(2026, 12, 1, 12, 0, tzinfo=UTC)
+    update_settings(db_session, user.id, next_invest_at=planned, next_rebalance_at=planned)
+
+    assert api.patch("/api/config", json={"onboarded": True}, headers=headers).status_code == 200
+
+    settings = get_settings(db_session, user.id)
+    assert (settings.next_invest_at, settings.next_rebalance_at) == (planned, planned)

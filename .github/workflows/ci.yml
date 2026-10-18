@@ -91,17 +91,17 @@ jobs:
             echo "CREDENTIAL_KEY_VERSION=1"
             echo "GOOGLE_CLIENT_ID=ci"
             echo "GOOGLE_CLIENT_SECRET=ci"
-            echo "GOOGLE_REDIRECT_URI=http://localhost:8000/auth/callback/google"
+            echo "GOOGLE_REDIRECT_URI=http://localhost:8000/api/auth/callback/google"
           } > "$home/.env"
           docker tag ghcr.io/jajiz/coinpilot:ci-1 ghcr.io/jajiz/coinpilot:ci-2
 
           "$home/deploy.sh" deploy ci-1
-          curl -fsS http://127.0.0.1:8000/health
+          curl -fsS http://127.0.0.1:8000/api/health
           "$home/deploy.sh" deploy ci-2
           test "$(tail -n 1 "$home/releases")" = ci-2
           "$home/deploy.sh" rollback
           test "$(tail -n 1 "$home/releases")" = ci-1
-          curl -fsS http://127.0.0.1:8000/health
+          curl -fsS http://127.0.0.1:8000/api/health
           test "$(ls "$home"/backups/*.dump | wc -l)" = 2
           "$home/compose.sh" run --rm platform python scripts/rotate_master_key.py --check
 
@@ -110,7 +110,7 @@ jobs:
           echo "TAG=never-healthy" > "$home/release.env"
           "$home/deploy.sh" rollback
           test "$(tail -n 1 "$home/releases")" = ci-1
-          curl -fsS http://127.0.0.1:8000/health
+          curl -fsS http://127.0.0.1:8000/api/health
 
       - name: The platform's log, when something failed
         if: failure()

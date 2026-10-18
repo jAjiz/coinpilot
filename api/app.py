@@ -6,6 +6,7 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -15,9 +16,14 @@ from sqlalchemy.exc import TimeoutError as PoolTimeout
 
 from api.context import AppContext
 from api.routes import assets, auth, config, credentials, health, history, invest, portfolio, proposal
+from api.web import mount_application
 from core.scheduler import Scheduler
 
 logger = logging.getLogger("coinpilot.api")
+
+# Every route of the API answers under it; every other path is the application (application
+# spec §2.1).
+API_PREFIX = "/api"
 
 DATABASE_DOWN = "the database cannot be reached right now; try again in a moment"
 
@@ -70,8 +76,16 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             await asyncio.to_thread(scheduler.stop)
 
 
-def create_app(context: AppContext) -> FastAPI:
-    app = FastAPI(title="CoinPilot", version="0.1.0", lifespan=_lifespan)
+def create_app(context: AppContext, web_dist: Path | None = None) -> FastAPI:
+    """`web_dist` is the application's build, served from this origin; None serves the API alone."""
+    app = FastAPI(
+        title="CoinPilot",
+        version="0.1.0",
+        lifespan=_lifespan,
+        docs_url=f"{API_PREFIX}/docs",
+        openapi_url=f"{API_PREFIX}/openapi.json",
+        redoc_url=None,
+    )
     app.state.context = context
     app.add_exception_handler(RequestValidationError, _validation_error)
     app.add_exception_handler(OperationalError, _database_error)
@@ -87,5 +101,7 @@ def create_app(context: AppContext) -> FastAPI:
         proposal.router,
         history.router,
     ):
-        app.include_router(router)
+        app.include_router(router, prefix=API_PREFIX)
+    if web_dist is not None:
+        mount_application(app, web_dist)
     return app

@@ -1,7 +1,8 @@
 """Sign-in with Google, the refresh of a sign-in, and who the caller is.
 
 The login state and the PKCE verifier cross Google's redirect in a signed cookie scoped
-to the callback path, so no table holds half-finished logins.
+to the callback path, so no table holds half-finished logins. The callback ends on a page
+of the application: `/` signed in, or `/login?error=<reason>` (application spec §3).
 
 A refused refresh or logout is returned, never raised. Every route runs in one
 transaction, and an exception would roll back a revocation made on the way to the
@@ -11,7 +12,7 @@ refusal.
 from __future__ import annotations
 
 import secrets
-import uuid
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -23,16 +24,16 @@ from api.schemas import MeOut, RefreshIn, TokenPairOut
 from core import google
 from core.db.types import UserStatus
 from core.refresh import IssuedRefresh, RefreshFailure, revoke, rotate, start_family
-from core.tokens import LOGIN_STATE_TTL, TokenInvalid
+from core.tokens import LOGIN_STATE_TTL, IssuedToken, TokenInvalid
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 PROVIDER = "google"
 LOGIN_COOKIE = "coinpilot_login"
-LOGIN_COOKIE_PATH = "/auth/callback"
+LOGIN_COOKIE_PATH = "/api/auth/callback"
 REFRESH_COOKIE = "coinpilot_refresh"
 # Sent to the auth routes only. `Strict`: a request another site starts never carries it.
-REFRESH_COOKIE_PATH = "/auth"
+REFRESH_COOKIE_PATH = "/api/auth"
 START_AGAIN = "the login expired or was not started here; start again"
 
 
@@ -48,15 +49,9 @@ def _presented_refresh(request: Request, body: RefreshIn | None) -> str | None:
     return request.cookies.get(REFRESH_COOKIE)
 
 
-def _signed_in(context: AppContext, user_id: uuid.UUID, refresh: IssuedRefresh) -> JSONResponse:
-    access = context.signer.issue(user_id)
-    body = TokenPairOut(
-        access_token=access.value,
-        expires_at=access.expires_at,
-        refresh_token=refresh.value,
-        refresh_expires_at=refresh.expires_at,
-    )
-    response = JSONResponse(body.model_dump(mode="json"))
+def _set_session(
+    response: Response, context: AppContext, access: IssuedToken, refresh: IssuedRefresh
+) -> None:
     response.set_cookie(
         ACCESS_COOKIE,
         access.value,
@@ -77,6 +72,16 @@ def _signed_in(context: AppContext, user_id: uuid.UUID, refresh: IssuedRefresh) 
         secure=context.config.cookie_secure,
         samesite="strict",
     )
+
+
+def _login_refused(reason: str) -> RedirectResponse:
+    """Back to the application's login page with the reason. No session cookie is set.
+
+    Returned, not raised: every refusal comes before the callback writes a row, so there
+    is nothing a commit could keep that a rollback should have dropped.
+    """
+    response = RedirectResponse(f"/login?error={quote(reason)}", status_code=302)
+    response.delete_cookie(LOGIN_COOKIE, path=LOGIN_COOKIE_PATH)
     return response
 
 
@@ -107,7 +112,7 @@ def login(provider: str, context: Ctx) -> RedirectResponse:
     return response
 
 
-@router.get("/callback/{provider}", response_model=TokenPairOut)
+@router.get("/callback/{provider}")
 def callback(
     provider: str,
     request: Request,
@@ -116,33 +121,34 @@ def callback(
     code: str | None = None,
     state: str | None = None,
     error: str | None = None,
-) -> JSONResponse:
+) -> RedirectResponse:
     _only_google(provider)
     if error:
-        raise HTTPException(400, "google did not grant the login")
+        return _login_refused("google did not grant the login")
     cookie = request.cookies.get(LOGIN_COOKIE)
     if not cookie or not code or not state:
-        raise HTTPException(400, START_AGAIN)
+        return _login_refused(START_AGAIN)
     try:
         expected = context.signer.verify_login_state(cookie)
     except TokenInvalid:
-        raise HTTPException(400, START_AGAIN) from None
+        return _login_refused(START_AGAIN)
     if not secrets.compare_digest(expected.state, state):
-        raise HTTPException(400, "the login state does not match; start again")
+        return _login_refused("the login state does not match; start again")
 
     try:
         identity = google.exchange_code(context.google_http, context.config.google, code, expected.verifier)
     except google.GoogleLoginFailed as exc:
-        raise HTTPException(400, str(exc)) from None
+        return _login_refused(str(exc))
 
     user = db.get_user_by_identity(session, PROVIDER, identity.subject)
     if user is None:
         user = db.create_user(session, PROVIDER, identity.subject, identity.email)
     if user.status != UserStatus.ACTIVE:
-        raise HTTPException(403, "this account is disabled")
+        return _login_refused("this account is disabled")
 
     refresh = start_family(session, user.id, context.now(), context.config.refresh_ttl)
-    response = _signed_in(context, user.id, refresh)
+    response = RedirectResponse("/", status_code=302)
+    _set_session(response, context, context.signer.issue(user.id), refresh)
     response.delete_cookie(LOGIN_COOKIE, path=LOGIN_COOKIE_PATH)
     return response
 
@@ -163,7 +169,16 @@ def refresh(request: Request, session: Db, context: Ctx, body: RefreshIn | None 
     if user is None or user.status != UserStatus.ACTIVE:
         db.revoke_family(session, outcome.family_id, now)
         return _signed_out(403, "this account is disabled")
-    return _signed_in(context, user.id, outcome)
+    access = context.signer.issue(user.id)
+    body = TokenPairOut(
+        access_token=access.value,
+        expires_at=access.expires_at,
+        refresh_token=outcome.value,
+        refresh_expires_at=outcome.expires_at,
+    )
+    response = JSONResponse(body.model_dump(mode="json"))
+    _set_session(response, context, access, outcome)
+    return response
 
 
 @router.post("/logout", status_code=204)

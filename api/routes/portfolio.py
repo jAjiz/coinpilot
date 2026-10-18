@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException
 
 import core.database as db
 from api.deps import Ctx, CurrentUser, Db
-from api.schemas import PortfolioOut
+from api.schemas import HoldingOut, PortfolioOut
 from core.crypto import CredentialsUnreadable, Sealed
 from core.db.models import PortfolioSnapshot
 from core.portfolio import plain_amount
@@ -20,12 +20,20 @@ router = APIRouter(prefix="/portfolio", tags=["portfolio"])
 
 
 def _out(snapshot: PortfolioSnapshot) -> PortfolioOut:
+    """The stored JSON, flattened. `holdings` is JSONB, which keeps no key order: the order is set here."""
+    stored = snapshot.holdings
+    holdings = sorted(
+        (HoldingOut(asset=asset, **fields) for asset, fields in stored.get("assets", {}).items()),
+        key=lambda holding: (holding.locked, not holding.managed, holding.asset),
+    )
     return PortfolioOut(
         as_of=snapshot.as_of,
         fiat=snapshot.fiat,
         total_value=plain_amount(snapshot.total_value),
         cash=plain_amount(snapshot.cash),
-        holdings=snapshot.holdings,
+        cash_target_pct=stored.get("cash_target_pct"),
+        cash_weight_pct=stored.get("cash_weight_pct"),
+        holdings=holdings,
     )
 
 
@@ -33,7 +41,7 @@ def _out(snapshot: PortfolioSnapshot) -> PortfolioOut:
 def read(user: CurrentUser, session: Db) -> PortfolioOut:
     snapshot = db.latest_snapshot(session, user.id)
     if snapshot is None:
-        raise HTTPException(404, "no snapshot yet; POST /portfolio/refresh to take one")
+        raise HTTPException(404, "no snapshot yet; POST /api/portfolio/refresh to take one")
     return _out(snapshot)
 
 
@@ -41,10 +49,10 @@ def read(user: CurrentUser, session: Db) -> PortfolioOut:
 def refresh(user: CurrentUser, session: Db, context: Ctx) -> PortfolioOut:
     settings = db.get_settings(session, user.id)
     if settings is None:
-        raise HTTPException(409, "choose a fiat with PATCH /config first")
+        raise HTTPException(409, "choose a fiat with PATCH /api/config first")
     record = db.get_credentials(session, user.id)
     if record is None:
-        raise HTTPException(409, "register a Kraken key with POST /credentials first")
+        raise HTTPException(409, "register a Kraken key with POST /api/credentials first")
 
     try:
         credentials = context.cipher.unseal(

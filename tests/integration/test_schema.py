@@ -105,3 +105,11 @@ def test_the_scheduler_columns_exist(db_session: Session):
     assert "failure_streak" in columns("user_settings")
     assert "pinned" in columns("portfolio_snapshots")
     assert {"operation", "trigger"} <= columns("sessions")
+
+
+def test_the_onboarded_at_column_exists(db_session: Session):
+    columns = {
+        column["name"]: column for column in inspect(db_session.get_bind()).get_columns("user_settings")
+    }
+
+    assert columns["onboarded_at"]["nullable"] is True

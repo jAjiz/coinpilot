@@ -272,10 +272,10 @@ def _load(context: ExecutionContext, user_id: uuid.UUID, *, allow_sells: bool) -
     with context.sessions() as session:
         settings = db.get_settings(session, user_id)
         if settings is None:
-            raise NotReady("choose a fiat with PATCH /config first")
+            raise NotReady("choose a fiat with PATCH /api/config first")
         record = db.get_credentials(session, user_id)
         if record is None:
-            raise NotReady("register a Kraken key with POST /credentials first")
+            raise NotReady("register a Kraken key with POST /api/credentials first")
         policy = Policy(
             allow_sells=allow_sells,
             cash_policy=CashPolicy.REDUCE_DRIFT if settings.cash_rebalance_enabled else CashPolicy.PRORATA,

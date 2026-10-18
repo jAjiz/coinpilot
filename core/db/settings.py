@@ -32,6 +32,7 @@ _UPDATABLE = frozenset(
         "min_drift_pct",
         "min_order_fiat",
         "next_invest_at",
+        "onboarded_at",
         "next_rebalance_at",
         "paused",
         "rebalance_cadence_anchor",

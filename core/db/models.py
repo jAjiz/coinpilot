@@ -132,6 +132,8 @@ class UserSettings(TimestampMixin, Base):
     next_rebalance_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     paused: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # When the user finished the application's onboarding; null until then (application spec §3).
+    onboarded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Scheduled operations that failed in a row. The alert fires on its edges (spec §10.5).
     failure_streak: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
 

@@ -43,7 +43,7 @@ def _merged(settings: UserSettings, changes: dict[str, object]) -> dict[str, obj
 def read_config(user: CurrentUser, session: Db) -> UserSettings:
     settings = db.get_settings(session, user.id)
     if settings is None:
-        raise HTTPException(404, "no settings yet; PATCH /config with a fiat to create them")
+        raise HTTPException(404, "no settings yet; PATCH /api/config with a fiat to create them")
     return settings
 
 
@@ -51,13 +51,15 @@ def read_config(user: CurrentUser, session: Db) -> UserSettings:
 def patch_config(body: ConfigPatch, user: CurrentUser, session: Db, context: Ctx) -> UserSettings:
     changes = body.model_dump(exclude_unset=True)
     fiat = changes.pop("fiat", None)
+    # Not a setting the cadences or the scheduler read: kept out of both.
+    onboarded = changes.pop("onboarded", None)
     fiat = fiat.strip().upper() if isinstance(fiat, str) else None
 
     settings = db.lock_settings(session, user.id)
     created = settings is None
     if created:
         if fiat is None:
-            raise HTTPException(409, "the first PATCH /config must choose a fiat")
+            raise HTTPException(409, "the first PATCH /api/config must choose a fiat")
         if fiat not in SUPPORTED_FIATS:
             raise HTTPException(422, f"supported fiats are {', '.join(SUPPORTED_FIATS)}")
         settings = db.create_settings(session, user.id, fiat=fiat)
@@ -78,4 +80,6 @@ def patch_config(body: ConfigPatch, user: CurrentUser, session: Db, context: Ctx
     )
     if moves:
         settings = db.update_settings(session, user.id, **moves)
+    if onboarded and settings.onboarded_at is None:
+        settings = db.update_settings(session, user.id, onboarded_at=context.now())
     return settings
