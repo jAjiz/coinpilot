@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from "react-router";
-import { cn } from "cn";
+import { cn } from "@/lib/utils";
 import { OfflineNotice } from "./OfflineNotice";
 
 const TABS = [

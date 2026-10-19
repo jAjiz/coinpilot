@@ -2,6 +2,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { expect, test } from "vitest";
+import { createQueryClient } from "@/providers";
 import { renderAt } from "@/test/render";
 
 const me = { id: "u1", email: "a@b.c", provider: "google", status: "active" };
@@ -106,3 +107,52 @@ test("an unknown path goes home", async () => {
   await waitFor(() => expect(router.state.location.pathname).toBe("/"));
   await screen.findByRole("heading", { name: "Home" });
 });
+
+test("a failed background refetch keeps the page", async () => {
+  let calls = 0;
+  const client = createQueryClient();
+  renderAt(
+    "/settings",
+    [
+      http.get("/api/auth/me", () => {
+        calls += 1;
+        return calls === 1
+          ? HttpResponse.json(me)
+          : HttpResponse.json({ detail: "platform down" }, { status: 503 });
+      }),
+      onboarded,
+    ],
+    client,
+  );
+  await screen.findByRole("heading", { name: "Settings" });
+  await client.invalidateQueries({ queryKey: ["me"] });
+  await waitFor(() => expect(calls).toBe(2));
+  expect(client.getQueryState(["me"])?.status).toBe("error");
+  expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+});
+
+test.each(["/api/config", "/api/credentials/status"])(
+  "a first load where %s is down offers to try again",
+  async (path) => {
+    renderAt("/", [
+      http.get(path, () =>
+        HttpResponse.json({ detail: "platform down" }, { status: 503 }),
+      ),
+      signedIn,
+      http.get("/api/config", () =>
+        HttpResponse.json({ detail: "no settings" }, { status: 404 }),
+      ),
+      http.get("/api/credentials/status", () =>
+        HttpResponse.json({ registered: false }),
+      ),
+      http.get("/api/assets", () =>
+        HttpResponse.json({ assets: [], cash_target_pct: "100" }),
+      ),
+    ]);
+    await screen.findByText("platform down");
+    expect(
+      screen.getByRole("button", { name: "Try again" }),
+    ).toBeInTheDocument();
+  },
+);

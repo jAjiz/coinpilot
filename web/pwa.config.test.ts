@@ -16,3 +16,7 @@ test("nothing is cached at run time", () =>
   expect(pwaOptions.workbox?.runtimeCaching).toEqual([]));
 test("no inline registration script", () =>
   expect(pwaOptions.injectRegister).toBe("script-defer"));
+test("navigations to the API are denied the shell fallback", () =>
+  expect(pwaOptions.workbox?.navigateFallbackDenylist).toContain(
+    API_NAVIGATION,
+  ));

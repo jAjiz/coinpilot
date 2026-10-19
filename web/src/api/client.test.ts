@@ -160,3 +160,17 @@ test("unwrap throws the platform's detail", async () => {
     detail: "Input should be greater than 0",
   });
 });
+
+test("a non-JSON failure with no status text still has a message", async () => {
+  // HTTP/2 carries no reason phrase, so statusText is empty.
+  const response = new Response("<html>Bad Gateway</html>", {
+    status: 502,
+    headers: { "Content-Type": "text/html" },
+  });
+  expect(response.statusText).toBe("");
+  const error = await unwrap(
+    Promise.resolve({ error: "<html>Bad Gateway</html>", response }),
+  ).catch((e: unknown) => e);
+  expect(error).toBeInstanceOf(ApiError);
+  expect((error as ApiError).message).toBe("The platform answered 502.");
+});

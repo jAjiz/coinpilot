@@ -88,7 +88,10 @@ export async function unwrap<T>(
   if (!response.ok) {
     throw new ApiError(
       response.status,
-      detailOf(error, response.statusText),
+      detailOf(
+        error,
+        response.statusText || `The platform answered ${response.status}.`,
+      ),
       error,
     );
   }

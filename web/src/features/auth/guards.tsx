@@ -8,7 +8,8 @@ import { useMe, useOnboarding, type Onboarding } from "./session";
 export function RequireSession() {
   const me = useMe();
   if (me.isPending) return <FullPageSkeleton />;
-  if (me.isError) return <LoadFailed error={me.error} onRetry={me.refetch} />;
+  if (me.isError && me.data === undefined)
+    return <LoadFailed error={me.error} onRetry={me.refetch} />;
   if (me.data === null) return <Navigate to="/login" replace />;
   return <Outlet />;
 }
@@ -19,7 +20,7 @@ function WithOnboarding({
   children: (state: Onboarding) => ReactElement;
 }) {
   const onboarding = useOnboarding();
-  if (onboarding.isError) {
+  if (onboarding.isError && onboarding.data === undefined) {
     return <LoadFailed error={onboarding.error} onRetry={onboarding.refetch} />;
   }
   if (!onboarding.data) return <FullPageSkeleton />;
