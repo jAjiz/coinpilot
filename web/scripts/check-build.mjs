@@ -25,8 +25,12 @@ if (!existsSync(manifestPath)) {
   }
 }
 
-if (!existsSync(path.join(dist, "sw.js")))
+const swPath = path.join(dist, "sw.js");
+if (!existsSync(swPath)) {
   problems.push("dist/sw.js is missing");
+} else if (!/denylist:\s*\[[^\]]*api/.test(readFileSync(swPath, "utf8"))) {
+  problems.push("dist/sw.js does not deny /api navigations the shell fallback");
+}
 
 if (problems.length > 0) {
   for (const problem of problems) console.error(`check:build: ${problem}`);
