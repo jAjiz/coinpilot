@@ -23,6 +23,8 @@
     "vite.config.ts",
     "pwa.config.ts",
     "pwa.config.test.ts",
-    "pwa-assets.config.ts"
+    "pwa-assets.config.ts",
+    "playwright.config.ts",
+    "e2e"
   ]
 }
