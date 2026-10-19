@@ -7,6 +7,7 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -76,20 +77,19 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             await asyncio.to_thread(scheduler.stop)
 
 
-def create_app(context: AppContext, web_dist: Path | None = None) -> FastAPI:
-    """`web_dist` is the application's build, served from this origin; None serves the API alone."""
+def _api() -> FastAPI:
+    """The routes and their documentation URLs, with nothing behind them.
+
+    `create_app` and `openapi_document` both start here, so the document cannot drift from
+    the running API.
+    """
     app = FastAPI(
         title="CoinPilot",
         version="0.1.0",
-        lifespan=_lifespan,
         docs_url=f"{API_PREFIX}/docs",
         openapi_url=f"{API_PREFIX}/openapi.json",
         redoc_url=None,
     )
-    app.state.context = context
-    app.add_exception_handler(RequestValidationError, _validation_error)
-    app.add_exception_handler(OperationalError, _database_error)
-    app.add_exception_handler(PoolTimeout, _database_error)
     for router in (
         health.router,
         auth.router,
@@ -102,6 +102,22 @@ def create_app(context: AppContext, web_dist: Path | None = None) -> FastAPI:
         history.router,
     ):
         app.include_router(router, prefix=API_PREFIX)
+    return app
+
+
+def openapi_document() -> dict[str, Any]:
+    """The API's OpenAPI document, built without a context, a database or a scheduler."""
+    return _api().openapi()
+
+
+def create_app(context: AppContext, web_dist: Path | None = None) -> FastAPI:
+    """`web_dist` is the application's build, served from this origin; None serves the API alone."""
+    app = _api()
+    app.router.lifespan_context = _lifespan
+    app.state.context = context
+    app.add_exception_handler(RequestValidationError, _validation_error)
+    app.add_exception_handler(OperationalError, _database_error)
+    app.add_exception_handler(PoolTimeout, _database_error)
     if web_dist is not None:
         mount_application(app, web_dist)
     return app

@@ -35,3 +35,9 @@ coverage.xml
 *.swp
 .DS_Store
 Thumbs.db
+
+# Web
+node_modules/
+web/coverage/
+web/playwright-report/
+web/test-results/

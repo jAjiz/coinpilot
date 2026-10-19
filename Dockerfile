@@ -1,3 +1,11 @@
+# The application: built here, served by the platform (spec §4.1).
+FROM node:24-trixie-slim AS web
+WORKDIR /web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+COPY web/ ./
+RUN npm run build && npm run check:build
+
 # The platform: FastAPI and the scheduler in one process (spec §4.1).
 # The same Python as CI and the venv: one version, not a range (spec §14).
 FROM python:3.14-slim-trixie
@@ -20,6 +28,7 @@ COPY exchange exchange
 COPY core core
 COPY api api
 COPY scripts scripts
+COPY --from=web /web/dist web/dist
 
 RUN useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin coinpilot
 USER coinpilot

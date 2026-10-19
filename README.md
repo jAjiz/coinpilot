@@ -50,8 +50,37 @@ PYTHONPATH=. alembic upgrade head
 PYTHONPATH=. uvicorn --factory api.main:build --port 8000
 ```
 
-Sign in at `http://localhost:8000/api/auth/login/google`. The API is described at
+Signing in needs the development server below: with it running, go to
+`http://localhost:5173/api/auth/login/google`. (To sign in directly on port 8000, set
+`GOOGLE_REDIRECT_URI` to the `8000` callback.) The API is described at
 `http://localhost:8000/api/docs`.
+
+## Developing the application
+
+The React application is in `web/` (Node 24, see `web/.nvmrc`).
+
+1. Run the API as above.
+2. In another terminal:
+
+   ```bash
+   cd web
+   npm ci
+   npm run dev
+   ```
+
+   Then open `http://localhost:5173`. Vite proxies `/api` to the API on port 8000, so
+   sign-in goes through the proxy and the Google OAuth client needs the redirect URI
+   `http://localhost:5173/api/auth/callback/google`.
+3. After a change to the API's routes or schemas, regenerate the contract and commit both
+   files:
+
+   ```bash
+   PYTHONPATH=. python scripts/export_openapi.py   # writes web/openapi.json
+   cd web && npm run generate                      # writes web/src/api/schema.d.ts
+   ```
+
+   Two checks refuse a stale copy: a platform test and `check:generated` in CI.
+4. Tests, from `web/`: `npm test` (unit) and `npm run e2e` (Playwright, builds first).
 
 ## Production
 
