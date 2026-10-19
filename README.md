@@ -50,7 +50,9 @@ PYTHONPATH=. alembic upgrade head
 PYTHONPATH=. uvicorn --factory api.main:build --port 8000
 ```
 
-Sign in at `http://localhost:8000/api/auth/login/google`. The API is described at
+Signing in needs the development server below: with it running, go to
+`http://localhost:5173/api/auth/login/google`. (To sign in directly on port 8000, set
+`GOOGLE_REDIRECT_URI` to the `8000` callback.) The API is described at
 `http://localhost:8000/api/docs`.
 
 ## Developing the application
