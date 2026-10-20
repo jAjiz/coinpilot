@@ -60,6 +60,10 @@ function parseDate(date: string): Date {
   return new Date(y, m - 1, d);
 }
 
+export function weekdayName(date: string): string {
+  return WEEKDAYS[parseDate(date).getDay()];
+}
+
 export function formatRun(at: string): string {
   const run = new Date(at);
   return `${WEEKDAYS[run.getDay()]} ${run.getDate()} ${MONTHS[run.getMonth()]} at ${pad(run.getHours())}:${pad(run.getMinutes())}`;
