@@ -265,13 +265,12 @@ export function AutomationForm({
     setSending(true);
     try {
       await unwrap(api.PATCH("/api/config", { body }));
+      // Stays disabled while the step advances: a second click would send again.
+      await onSaved();
     } catch (error) {
       setFailure(describeError(error));
       setSending(false);
-      return;
     }
-    setSending(false);
-    await onSaved();
   }
 
   return (

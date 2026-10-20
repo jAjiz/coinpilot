@@ -290,3 +290,58 @@ test("the platform's refusal is shown", async () => {
   expect(router.state.location.pathname).toBe("/onboarding/automation");
   expect(save()).toBeEnabled();
 });
+
+test("a configuration still at the platform's default shows the wizard's defaults", async () => {
+  await open(
+    platform({
+      invest_cash_enabled: true,
+      auto_rebalance_enabled: true,
+      min_drift_pct: "5",
+      min_order_fiat: "25",
+    }),
+  );
+  expect(
+    screen.getByRole("switch", { name: "Invest free cash automatically" }),
+  ).not.toBeChecked();
+  expect(
+    screen.getByRole("switch", {
+      name: "Rebalance automatically, without asking",
+    }),
+  ).not.toBeChecked();
+  expect(
+    screen.getByLabelText("Rebalance only when an asset drifts more than"),
+  ).toHaveValue("1");
+  expect(screen.getByLabelText("Skip orders smaller than")).toHaveValue("0");
+});
+
+test("as soon as possible is sent as the minimum cadence", async () => {
+  const user = userEvent.setup();
+  const fake = platform();
+  await open(fake);
+  await user.selectOptions(
+    screen.getByLabelText("Invest cadence"),
+    "As soon as possible (every 15 min)",
+  );
+  await user.click(save());
+  await waitFor(() => expect(fake.requests).toHaveLength(1));
+  expect(fake.requests[0].body).toMatchObject({
+    invest_cadence_mode: "MIN",
+    invest_interval_days: null,
+    invest_interval_months: null,
+    invest_cadence_anchor: null,
+  });
+});
+
+test("a drift typed with a comma is sent with a point", async () => {
+  const user = userEvent.setup();
+  const fake = platform();
+  await open(fake);
+  const drift = screen.getByLabelText(
+    "Rebalance only when an asset drifts more than",
+  );
+  await user.clear(drift);
+  await user.type(drift, "1,5");
+  await user.click(save());
+  await waitFor(() => expect(fake.requests).toHaveLength(1));
+  expect(fake.requests[0].body).toMatchObject({ min_drift_pct: "1.5" });
+});
