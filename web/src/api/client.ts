@@ -81,6 +81,10 @@ function detailOf(body: unknown, fallback: string): string {
   return fallback;
 }
 
+export function describeError(error: unknown): string {
+  return error instanceof ApiError ? error.detail : "The connection failed.";
+}
+
 export async function unwrap<T>(
   call: Promise<{ data?: T; error?: unknown; response: Response }>,
 ): Promise<T> {

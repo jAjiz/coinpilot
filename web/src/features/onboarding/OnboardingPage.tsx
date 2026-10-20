@@ -1,6 +1,7 @@
 import { useParams } from "react-router";
-import { OfflineNotice } from "@/features/shell/OfflineNotice";
 import type { OnboardingStep } from "@/lib/onboarding";
+import { KeyStep } from "./KeyStep";
+import { WizardLayout } from "./WizardLayout";
 
 const HEADINGS: Record<OnboardingStep, string> = {
   key: "Kraken key",
@@ -10,14 +11,11 @@ const HEADINGS: Record<OnboardingStep, string> = {
 };
 
 export function OnboardingPage() {
-  const { step } = useParams<{ step: OnboardingStep }>();
+  const step = useParams<{ step: OnboardingStep }>().step!;
+  if (step === "key") return <KeyStep />;
   return (
-    <div className="mx-auto flex min-h-dvh max-w-md flex-col">
-      <OfflineNotice />
-      <main className="flex-1 p-6">
-        <h1 className="text-xl font-semibold">{HEADINGS[step!]}</h1>
-        <p>This step is not built yet.</p>
-      </main>
-    </div>
+    <WizardLayout step={step} title={HEADINGS[step]}>
+      <p>This step is not built yet.</p>
+    </WizardLayout>
   );
 }
