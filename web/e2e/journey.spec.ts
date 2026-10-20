@@ -1,4 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
+import { mockApi, type Reply } from "./mockApi.js";
 
 const ME = {
   id: "0b0f6c1e-6a58-4d8a-9d46-3c1f6f0f6b11",
@@ -7,27 +8,6 @@ const ME = {
   status: "active",
   created_at: "2026-01-01T00:00:00Z",
 };
-
-type Reply = { status: number; body?: unknown };
-type Replies = Record<string, Reply | (() => Reply)>;
-
-// Answers every /api request; an unlisted route is a 404, so a request the
-// test did not expect fails loudly instead of reaching anything.
-async function mockApi(page: Page, replies: Replies) {
-  const calls: string[] = [];
-  await page.route("**/api/**", async (route) => {
-    const path = new URL(route.request().url()).pathname;
-    calls.push(path);
-    const entry = replies[path];
-    const reply = typeof entry === "function" ? entry() : entry;
-    await route.fulfill({
-      status: reply?.status ?? 404,
-      contentType: "application/json",
-      body: JSON.stringify(reply?.body ?? { detail: "not mocked" }),
-    });
-  });
-  return calls;
-}
 
 const unauthorized: Reply = { status: 401, body: { detail: "unauthorized" } };
 
@@ -101,5 +81,7 @@ test("an expired session is renewed without leaving the page", async ({
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Home" })).toBeVisible();
   await expect(page).toHaveURL(/\/$/);
-  expect(calls.filter((path) => path === "/api/auth/refresh")).toHaveLength(1);
+  expect(
+    calls.filter((call) => call === "POST /api/auth/refresh"),
+  ).toHaveLength(1);
 });

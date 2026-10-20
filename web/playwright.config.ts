@@ -11,6 +11,7 @@ export default defineConfig({
   use: {
     baseURL: "http://localhost:4173",
     serviceWorkers: "block",
+    timezoneId: "Europe/Madrid",
     trace: "retain-on-failure",
   },
   projects: [{ name: "pixel-7", use: { ...devices["Pixel 7"] } }],
