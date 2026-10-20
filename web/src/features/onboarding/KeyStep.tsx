@@ -1,4 +1,3 @@
-import { useMutation } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { ApiError, api, describeError, unwrap } from "@/api/client";
 import { useCredentialStatus } from "@/api/queries";
@@ -27,24 +26,40 @@ export function KeyStep() {
   const [apiKey, setApiKey] = useState("");
   const [apiSecret, setApiSecret] = useState("");
   const [accepted, setAccepted] = useState<KeyAccepted | null>(null);
+  const [failure, setFailure] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
+  const [advancing, setAdvancing] = useState(false);
 
-  const save = useMutation({
-    mutationFn: (body: { api_key: string; api_secret: string }) =>
-      unwrap(api.POST("/api/credentials", { body })),
-    onSuccess: (reply) => {
+  // Not a useMutation: its cache would keep the key and secret as `variables`.
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setAccepted(null);
+    setFailure(null);
+    setSending(true);
+    try {
+      const reply = await unwrap(
+        api.POST("/api/credentials", {
+          body: { api_key: apiKey, api_secret: apiSecret },
+        }),
+      );
       setApiKey("");
       setApiSecret("");
       setAccepted(reply);
-    },
-  });
-
-  function submit(event: FormEvent) {
-    event.preventDefault();
-    setAccepted(null);
-    save.mutate({ api_key: apiKey, api_secret: apiSecret });
+    } catch (error) {
+      setFailure(failureMessage(error));
+    } finally {
+      setSending(false);
+    }
   }
 
-  const proceed = () => void advance("portfolio");
+  async function proceed() {
+    setAdvancing(true);
+    try {
+      await advance("portfolio");
+    } finally {
+      setAdvancing(false);
+    }
+  }
 
   if (status.isPending) {
     return (
@@ -94,14 +109,20 @@ export function KeyStep() {
           <p>
             A key is saved{verifiedOn ? `, verified on ${verifiedOn}` : ""}.
           </p>
-          <Button onClick={proceed} disabled={!online}>
+          <Button
+            onClick={() => void proceed()}
+            disabled={!online || advancing}
+          >
             Continue
           </Button>
           <h2 className="text-lg font-semibold">Replace the key</h2>
         </div>
       )}
 
-      <form onSubmit={submit} className="flex flex-col gap-4">
+      <form
+        onSubmit={(event) => void submit(event)}
+        className="flex flex-col gap-4"
+      >
         <div className="flex flex-col gap-2">
           <Label htmlFor="api-key">API key</Label>
           <Input
@@ -124,9 +145,9 @@ export function KeyStep() {
             onChange={(event) => setApiSecret(event.target.value)}
           />
         </div>
-        <FormError message={save.isError ? failureMessage(save.error) : null} />
-        <Button type="submit" disabled={save.isPending || !online}>
-          {save.isPending ? "Verifying with Kraken…" : "Verify & save"}
+        <FormError message={failure} />
+        <Button type="submit" disabled={sending || !online}>
+          {sending ? "Verifying with Kraken…" : "Verify & save"}
         </Button>
       </form>
 
@@ -145,7 +166,10 @@ export function KeyStep() {
               that it is useless anywhere else.
             </p>
           )}
-          <Button onClick={proceed} disabled={!online}>
+          <Button
+            onClick={() => void proceed()}
+            disabled={!online || advancing}
+          >
             Continue
           </Button>
         </div>

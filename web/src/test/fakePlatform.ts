@@ -71,6 +71,7 @@ function detail(status: number, message: string) {
 export function fakePlatform(initial: Partial<FakeState> = {}): {
   handlers: HttpHandler[];
   state: FakeState;
+  // every non-GET request, in order, the portfolio refresh POST included
   requests: FakeRequest[];
 } {
   const state: FakeState = { ...DEFAULTS, ...initial };
@@ -85,6 +86,11 @@ export function fakePlatform(initial: Partial<FakeState> = {}): {
       body,
     });
     return body;
+  }
+
+  // 100 minus the stored targets, as the platform computes it.
+  function cashTarget(): string {
+    return sum(["100", ...state.assets.map((a) => `-${a.target_pct}`)]);
   }
 
   function withSchedule(config: Config): Config {
@@ -108,6 +114,13 @@ export function fakePlatform(initial: Partial<FakeState> = {}): {
       const { onboarded, ...fields } = patch;
       if (state.config === null && !patch.fiat) {
         return detail(409, "settings need a fiat first");
+      }
+      if (
+        state.config !== null &&
+        patch.fiat &&
+        patch.fiat !== state.config.fiat
+      ) {
+        return detail(422, "the fiat cannot be changed");
       }
       const base: Config = state.config ?? {
         ...DEFAULT_CONFIG,
@@ -145,31 +158,39 @@ export function fakePlatform(initial: Partial<FakeState> = {}): {
     http.get("/api/assets", () =>
       HttpResponse.json({
         assets: state.assets,
-        cash_target_pct: sum([
-          "100",
-          ...state.assets.map((a) => `-${a.target_pct}`),
-        ]),
+        cash_target_pct: cashTarget(),
       }),
     ),
     http.put("/api/assets/:asset", async ({ request, params }) => {
       const body = (await record(request)) as { target_pct: string | number };
       const asset = String(params.asset);
       const target = String(body.target_pct);
-      const fiat = state.config?.fiat ?? "";
+      if (state.config === null) {
+        return detail(409, "choose a fiat with PATCH /api/config first");
+      }
+      const fiat = state.config.fiat;
       if (state.untradable.includes(asset)) {
         return detail(422, `kraken has no tradable ${asset}/${fiat} pair`);
       }
       const others = state.assets.filter((a) => a.asset !== asset);
       const total = sum([...others.map((a) => a.target_pct), target]);
       if (compare(total, "100") === 1) {
-        return detail(422, `targets would add up to ${total}%, above 100%`);
+        return detail(
+          422,
+          `the weights would sum to ${total}; the limit is 100`,
+        );
       }
       const stored = { asset, pair: `${asset}/${fiat}`, target_pct: target };
-      state.assets = [...others, stored];
+      state.assets = [...others, stored].sort((a, b) =>
+        a.asset < b.asset ? -1 : 1,
+      );
       return HttpResponse.json(stored);
     }),
     http.delete("/api/assets/:asset", async ({ request, params }) => {
       await record(request);
+      if (!state.assets.some((a) => a.asset === params.asset)) {
+        return detail(404, "that asset has no weight");
+      }
       state.assets = state.assets.filter((a) => a.asset !== params.asset);
       return new HttpResponse(null, { status: 204 });
     }),
@@ -207,7 +228,7 @@ export function fakePlatform(initial: Partial<FakeState> = {}): {
         fiat: state.config.fiat,
         total_value: total,
         cash: state.portfolio.cash,
-        cash_target_pct: null,
+        cash_target_pct: cashTarget(),
         cash_weight_pct: null,
         holdings,
       });

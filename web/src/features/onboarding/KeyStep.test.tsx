@@ -3,6 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { afterEach, expect, test, vi } from "vitest";
 import type { Config } from "@/api/queries";
+import { meKey, onboardingKey } from "@/features/auth/session";
+import { createQueryClient } from "@/providers";
 import { renderAt } from "@/test/render";
 import { fakePlatform } from "@/test/fakePlatform";
 
@@ -55,6 +57,8 @@ test("an accepted key moves on to the portfolio", async () => {
   await fillKey(user);
   await user.click(screen.getByRole("button", { name: "Verify & save" }));
   await screen.findByText("Key saved.");
+  expect(screen.queryByText(/also has permissions/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/Restrict the key/)).not.toBeInTheDocument();
   expect(platform.requests).toEqual([
     {
       method: "POST",
@@ -75,6 +79,27 @@ test("the fields are emptied once the key is accepted", async () => {
   await screen.findByText("Key saved.");
   expect(screen.getByLabelText("API key")).toHaveValue("");
   expect(screen.getByLabelText("Private key")).toHaveValue("");
+});
+
+test("the secret is kept nowhere once the request is done", async () => {
+  const user = userEvent.setup();
+  const client = createQueryClient();
+  renderAt("/onboarding/key", fakePlatform().handlers, client);
+  await fillKey(user);
+  await user.click(screen.getByRole("button", { name: "Verify & save" }));
+  await screen.findByText("Key saved.");
+  const kept = JSON.stringify([
+    client
+      .getMutationCache()
+      .getAll()
+      .map((m) => [m.state, m.options]),
+    client
+      .getQueryCache()
+      .getAll()
+      .map((q) => q.state),
+  ]);
+  expect(kept).not.toContain("the-secret");
+  expect(kept).not.toContain("the-key");
 });
 
 test("extra permissions and a missing IP restriction are pointed out", async () => {
@@ -208,6 +233,20 @@ test("the button is disabled while offline", async () => {
   expect(screen.getByRole("status")).toHaveTextContent("You're offline");
 });
 
+test("Continue is disabled while offline", async () => {
+  vi.spyOn(window.navigator, "onLine", "get").mockReturnValue(false);
+  renderAt(
+    "/onboarding/key",
+    fakePlatform({
+      registered: true,
+      config: { fiat: "EUR", onboarded_at: null } as Config,
+    }).handlers,
+  );
+  expect(
+    await screen.findByRole("button", { name: "Continue" }),
+  ).toBeDisabled();
+});
+
 test("a saved key can be kept", async () => {
   const user = userEvent.setup();
   const config = { fiat: "EUR", onboarded_at: null } as Config;
@@ -226,19 +265,30 @@ test("a saved key can be kept", async () => {
 
 test("a step that cannot load says why and tries again", async () => {
   const user = userEvent.setup();
-  let calls = 0;
-  const platform = fakePlatform();
-  renderAt("/onboarding/key", [
-    http.get("/api/credentials/status", () => {
-      calls += 1;
-      // the gate asks first, the step second
-      return calls === 2
-        ? HttpResponse.json({ detail: "platform down" }, { status: 503 })
-        : HttpResponse.json({ registered: false });
-    }),
-    ...platform.handlers,
-  ]);
+  // the gate's state is cached, so only the step's own query goes to the platform
+  const client = createQueryClient();
+  client.setQueryData(meKey, {
+    id: "u1",
+    email: "a@b.c",
+    provider: "google",
+    status: "active",
+  });
+  client.setQueryData(onboardingKey, { onboarded: false, step: "key" });
+  let down = true;
+  renderAt(
+    "/onboarding/key",
+    [
+      http.get("/api/credentials/status", () =>
+        down
+          ? HttpResponse.json({ detail: "platform down" }, { status: 503 })
+          : HttpResponse.json({ registered: false }),
+      ),
+      ...fakePlatform().handlers,
+    ],
+    client,
+  );
   await screen.findByText("platform down");
+  down = false;
   await user.click(screen.getByRole("button", { name: "Try again" }));
   await screen.findByLabelText("API key");
 });
