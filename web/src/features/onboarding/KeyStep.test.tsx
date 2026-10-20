@@ -255,6 +255,7 @@ test("a saved key can be kept", async () => {
     fakePlatform({ registered: true, config }).handlers,
   );
   await screen.findByText(/A key is saved, verified on/);
+  expect(screen.getByText(/verified on 20 October 2026/)).toBeInTheDocument();
   expect(
     screen.getByRole("heading", { name: "Replace the key" }),
   ).toBeInTheDocument();

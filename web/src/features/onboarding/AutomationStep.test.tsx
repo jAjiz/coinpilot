@@ -270,6 +270,21 @@ test("an empty start date is refused next to its field", async () => {
   expect(fake.requests).toEqual([]);
 });
 
+test("a start date outside the years 2000 to 9999 is refused like an empty one", async () => {
+  const user = userEvent.setup();
+  const fake = platform();
+  await open(fake);
+  pickDate("Invest start date", "0099-10-19");
+  await user.click(save());
+  expect(await screen.findByText("Choose a start date.")).toBeInTheDocument();
+  expect(fake.requests).toEqual([]);
+  pickDate("Invest start date", "2026-10-19");
+  pickDate("Rebalance start date", "275760-09-13");
+  await user.click(save());
+  expect(await screen.findByText("Choose a start date.")).toBeInTheDocument();
+  expect(fake.requests).toEqual([]);
+});
+
 test("the platform's refusal is shown", async () => {
   const user = userEvent.setup();
   const fake = platform();

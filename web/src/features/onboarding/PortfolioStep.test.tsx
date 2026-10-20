@@ -124,6 +124,48 @@ test("saving writes one PUT per managed asset and moves on", async () => {
   ]);
 });
 
+test("Save targets stays disabled while the step advances", async () => {
+  const user = userEvent.setup();
+  const fake = platform();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  let advancing = false;
+  let held = 0;
+  renderAt("/onboarding/portfolio", [
+    http.get("/api/config", async () => {
+      if (advancing) {
+        held += 1;
+        await gate;
+      }
+      return undefined;
+    }),
+    ...fake.handlers,
+  ]);
+  await screen.findByLabelText("Target for BTC");
+  const saveButton = () => screen.getByRole("button", { name: "Save targets" });
+  advancing = true;
+  await user.click(saveButton());
+  await waitFor(() => expect(held).toBeGreaterThan(0));
+  expect(saveButton()).toBeDisabled();
+  await user.click(saveButton());
+  release();
+  await screen.findByRole("heading", { name: "Automation" });
+  expect(fake.requests.filter((r) => r.method === "PUT")).toHaveLength(2);
+});
+
+test("an account with nothing held says so", async () => {
+  renderAt(
+    "/onboarding/portfolio",
+    platform({ portfolio: { cash: "100", holdings: [] } }).handlers,
+  );
+  expect(
+    await screen.findByText(
+      "Nothing is held yet; add the assets you want to buy.",
+    ),
+  ).toBeInTheDocument();
+  expect(screen.getByLabelText("Asset to add")).toBeInTheDocument();
+});
+
 test("a comma is a decimal separator", async () => {
   const user = userEvent.setup();
   const fake = platform();

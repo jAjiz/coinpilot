@@ -81,7 +81,7 @@ export function KeyStep() {
 
   const registered = status.data.registered && accepted === null;
   const verifiedOn = status.data.validated_at
-    ? new Date(status.data.validated_at).toLocaleDateString(undefined, {
+    ? new Date(status.data.validated_at).toLocaleDateString("en-GB", {
         dateStyle: "long",
       })
     : null;

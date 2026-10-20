@@ -110,7 +110,7 @@ function rebalanceWhen(form: CadenceForm<RebalanceChoice>): string {
     case "quarterly":
       return `On the ${d} of every quarter${late(date)}`;
     case "half-yearly":
-      return `On the ${d} every six months`;
+      return `On the ${d} every six months${late(date)}`;
     case "yearly":
       return `Every year on ${date.getDate()} ${MONTHS[date.getMonth()]}`;
   }

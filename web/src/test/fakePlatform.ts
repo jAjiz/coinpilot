@@ -129,10 +129,11 @@ export function fakePlatform(initial: Partial<FakeState> = {}): {
         next_rebalance_at: null,
         onboarded_at: null,
       };
-      const defined = Object.fromEntries(
-        Object.entries(fields).filter(([, value]) => value != null),
+      // Like the real route (exclude_unset): a field sent as null is cleared.
+      const sent = Object.fromEntries(
+        Object.entries(fields).filter(([, value]) => value !== undefined),
       );
-      state.config = { ...base, ...defined } as Config;
+      state.config = { ...base, ...sent } as Config;
       if (onboarded) state.config.onboarded_at = "2026-10-20T10:00:00Z";
       return HttpResponse.json(withSchedule(state.config));
     }),

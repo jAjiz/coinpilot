@@ -78,6 +78,22 @@ test("yearly, half-yearly, automatic, no drift threshold", () => {
   );
 });
 
+test("the late-month suffix follows the day, never the yearly choice", () => {
+  const second = (choice: "quarterly" | "half-yearly" | "yearly") =>
+    summarize({
+      ...base,
+      rebalance: { kind: "choice", choice, date: "2026-10-31" },
+    })[1];
+  expect(second("quarterly")).toContain(
+    "On the 31st of every quarter (or the last day of a shorter month), if",
+  );
+  expect(second("half-yearly")).toContain(
+    "On the 31st every six months (or the last day of a shorter month), if",
+  );
+  expect(second("yearly")).toContain("Every year on 31 October, if");
+  expect(second("yearly")).not.toContain("shorter month");
+});
+
 test("a minimum order adds a sentence", () => {
   const out = summarize({ ...base, min_order_fiat: "10" });
   expect(out).toHaveLength(3);

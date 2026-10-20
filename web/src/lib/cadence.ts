@@ -40,6 +40,12 @@ export function localDate(at: Date): string {
   return `${pad(at.getFullYear(), 4)}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
 }
 
+// A date the form can send: YYYY-MM-DD with a year from 2000 to 9999.
+export function isUsableDate(date: string): boolean {
+  const match = /^(\d{4})-\d{2}-\d{2}$/.exec(date);
+  return match !== null && Number(match[1]) >= 2000;
+}
+
 export function localNoon(date: string): string {
   const [y, m, d] = date.split("-").map(Number);
   return new Date(y, m - 1, d, 12).toISOString();

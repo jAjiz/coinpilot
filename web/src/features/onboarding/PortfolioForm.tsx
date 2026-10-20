@@ -239,8 +239,9 @@ function Rows({
       // again starts from what is stored.
       await client.invalidateQueries({ queryKey: assetsKey });
     }
-    setSaving(false);
+    // Stays disabled while the step advances: a second tap would send again.
     if (failedAt === null) await onSaved();
+    else setSaving(false);
   }
 
   return (
@@ -250,6 +251,9 @@ function Rows({
         Targets start at today&apos;s weights, so the first rebalance has
         nothing to do. Change them to where you want the portfolio to be.
       </p>
+      {account.holdings.length === 0 && (
+        <p>Nothing is held yet; add the assets you want to buy.</p>
+      )}
       <ul className="flex flex-col gap-3">
         {rows.map((row) => (
           <li

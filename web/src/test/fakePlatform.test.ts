@@ -79,6 +79,27 @@ test("the fiat cannot be changed, but may be repeated", async () => {
   });
 });
 
+test("a field sent as null is cleared, as the real route does", async () => {
+  const p = fakePlatform();
+  await call(p, "PATCH", "/api/config", eur);
+  await call(p, "PATCH", "/api/config", {
+    invest_interval_days: 1,
+    invest_interval_months: null,
+  });
+  const daily = await call(p, "PATCH", "/api/config", {});
+  expect(daily.body.invest_interval_days).toBe(1);
+  const monthly = await call(p, "PATCH", "/api/config", {
+    invest_interval_days: null,
+    invest_interval_months: 1,
+  });
+  expect(monthly.body.invest_interval_days).toBeNull();
+  expect(monthly.body.invest_interval_months).toBe(1);
+  expect((await call(p, "GET", "/api/config")).body).toMatchObject({
+    invest_interval_days: null,
+    invest_interval_months: 1,
+  });
+});
+
 test("a refresh reports the cash target left by the stored targets", async () => {
   const p = fakePlatform();
   await call(p, "PATCH", "/api/config", eur);

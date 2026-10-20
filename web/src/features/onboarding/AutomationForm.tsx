@@ -10,6 +10,7 @@ import { useOnline } from "@/features/shell/useOnline";
 import {
   cadencePatch,
   investFields,
+  isUsableDate,
   localDate,
   rebalanceFields,
   type CadenceForm,
@@ -234,11 +235,13 @@ export function AutomationForm({
       investDate:
         invest.kind === "choice" &&
         invest.choice !== "asap" &&
-        invest.date === ""
+        !isUsableDate(invest.date)
           ? NO_DATE
           : null,
       rebalanceDate:
-        rebalance.kind === "choice" && rebalance.date === "" ? NO_DATE : null,
+        rebalance.kind === "choice" && !isUsableDate(rebalance.date)
+          ? NO_DATE
+          : null,
       drift: drift === null || compare(drift, "100") > 0 ? INVALID_DRIFT : null,
       minimum: minimum === null ? INVALID_MINIMUM : null,
     };
