@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, describeError, unwrap } from "@/api/client";
 import { assetsKey, useAssets } from "@/api/queries";
+import type { components } from "@/api/schema";
 import { FormError } from "@/components/FormError";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -57,18 +58,23 @@ export function PortfolioForm({
   });
   const assets = useAssets();
 
-  if (account.isPending || assets.isPending) return <StepSkeleton />;
-  if (account.isError) {
-    return (
+  // Once the data exists the rows stay, whatever a later refetch does: they
+  // hold the user's edits.
+  if (account.data === undefined) {
+    return account.isError ? (
       <StepFailed
         error={account.error}
         onRetry={() => void account.refetch()}
       />
+    ) : (
+      <StepSkeleton />
     );
   }
-  if (assets.isError) {
-    return (
+  if (assets.data === undefined) {
+    return assets.isError ? (
       <StepFailed error={assets.error} onRetry={() => void assets.refetch()} />
+    ) : (
+      <StepSkeleton />
     );
   }
   return (
@@ -81,21 +87,10 @@ export function PortfolioForm({
   );
 }
 
-type Account = {
-  cash: string;
-  holdings: {
-    asset: string;
-    value: string | null;
-    locked: boolean;
-    managed: boolean;
-    target_pct: string | null;
-  }[];
-};
+type Account = Pick<components["schemas"]["PortfolioOut"], "cash" | "holdings">;
+type StoredAsset = components["schemas"]["AssetOut"];
 
-function initialRows(
-  account: Account,
-  stored: { asset: string; target_pct: string }[],
-): Row[] {
+function initialRows(account: Account, stored: StoredAsset[]): Row[] {
   const weights = prefillWeights(account.cash, account.holdings);
   const storedTarget = new Map(stored.map((s) => [s.asset, s.target_pct]));
   return account.holdings.map((h): Row => {
@@ -132,7 +127,7 @@ function Rows({
 }: {
   fiat: string;
   account: Account;
-  stored: { asset: string; target_pct: string }[];
+  stored: StoredAsset[];
   onSaved: () => Promise<void>;
 }) {
   const client = useQueryClient();
@@ -234,7 +229,12 @@ function Rows({
       }
       failedAt = null;
     } catch (error) {
-      change(failedAt!, { error: describeError(error) });
+      const message = describeError(error);
+      if (rows.some((row) => row.asset === failedAt)) {
+        change(failedAt!, { error: message });
+      } else {
+        setFormError(message);
+      }
       // The writes before the failure stand: read them back, so that sending
       // again starts from what is stored.
       await client.invalidateQueries({ queryKey: assetsKey });

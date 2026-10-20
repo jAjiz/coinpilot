@@ -288,3 +288,118 @@ test("an unreachable Kraken on the read offers a retry", async () => {
   await screen.findByLabelText("Target for BTC");
   await waitFor(() => expect(calls).toBe(2));
 });
+
+test("a stored target that cannot be managed is kept, and counts toward 100", async () => {
+  const user = userEvent.setup();
+  const fake = platform({
+    portfolio: {
+      cash: "100",
+      holdings: [
+        holding("BTC", "300", { managed: true, target_pct: "50" }),
+        holding("DOT", "50", { locked: true, managed: true, target_pct: "40" }),
+      ],
+    },
+    assets: [
+      { asset: "BTC", pair: "BTC/EUR", target_pct: "50" },
+      { asset: "DOT", pair: "DOT/EUR", target_pct: "40" },
+    ],
+  });
+  renderAt("/onboarding/portfolio", fake.handlers);
+  const btc = await screen.findByLabelText("Target for BTC");
+  expect(screen.getByText("Cash (EUR) target: 10 %")).toBeInTheDocument();
+  await user.clear(btc);
+  await user.type(btc, "61");
+  expect(screen.getByText("Cash (EUR) target: -1 %")).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Save targets" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "The targets add up to more than 100 %.",
+  );
+  expect(fake.requests.filter((r) => r.method !== "POST")).toEqual([]);
+  await user.clear(btc);
+  await user.type(btc, "60");
+  await user.click(screen.getByRole("button", { name: "Save targets" }));
+  await screen.findByRole("heading", { name: "Automation" });
+  expect(fake.requests.filter((r) => r.method === "DELETE")).toEqual([]);
+});
+
+test("sending again after a failed write does not repeat the earlier deletes", async () => {
+  const user = userEvent.setup();
+  const fake = platform({
+    assets: [
+      { asset: "BTC", pair: "BTC/EUR", target_pct: "50" },
+      { asset: "ETH", pair: "ETH/EUR", target_pct: "10" },
+    ],
+    untradable: ["ETH"],
+  });
+  renderAt("/onboarding/portfolio", fake.handlers);
+  const eth = await screen.findByLabelText("Target for ETH");
+  await user.click(screen.getByRole("switch", { name: "Manage BTC" }));
+  await user.clear(eth);
+  await user.type(eth, "20");
+  await user.click(screen.getByRole("button", { name: "Save targets" }));
+  await within(rowOf("ETH")).findByRole("alert");
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Save targets" })).toBeEnabled(),
+  );
+  await user.click(screen.getByRole("button", { name: "Save targets" }));
+  await waitFor(() =>
+    expect(fake.requests.filter((r) => r.method === "PUT")).toHaveLength(2),
+  );
+  expect(fake.requests.filter((r) => r.method === "DELETE")).toHaveLength(1);
+});
+
+test("the rows stay when reading the stored assets back fails", async () => {
+  const user = userEvent.setup();
+  const fake = platform({
+    assets: [{ asset: "ETH", pair: "ETH/EUR", target_pct: "10" }],
+    untradable: ["ETH"],
+  });
+  let reads = 0;
+  renderAt("/onboarding/portfolio", [
+    http.get("/api/assets", () => {
+      reads += 1;
+      return reads <= 2
+        ? undefined
+        : HttpResponse.json({ detail: "down" }, { status: 503 });
+    }),
+    ...fake.handlers,
+  ]);
+  await screen.findByLabelText("Target for ETH");
+  await user.click(screen.getByRole("button", { name: "Save targets" }));
+  await within(rowOf("ETH")).findByRole("alert");
+  await waitFor(() => expect(reads).toBeGreaterThan(1));
+  expect(screen.getByLabelText("Target for ETH")).toBeInTheDocument();
+  expect(within(rowOf("ETH")).getByRole("alert")).toHaveTextContent(
+    "kraken has no tradable ETH/EUR pair",
+  );
+});
+
+test("a failed delete of an asset with no row is shown on the form", async () => {
+  const user = userEvent.setup();
+  const fake = platform({
+    assets: [{ asset: "OLD", pair: "OLD/EUR", target_pct: "5" }],
+  });
+  renderAt("/onboarding/portfolio", [
+    // the refresh does not list OLD, so it has no row
+    http.post("/api/portfolio/refresh", () =>
+      HttpResponse.json({
+        as_of: "2026-10-20T10:00:00Z",
+        fiat: "EUR",
+        total_value: "400",
+        cash: "100",
+        cash_target_pct: "95",
+        cash_weight_pct: null,
+        holdings: [holding("BTC", "300")],
+      }),
+    ),
+    http.delete("/api/assets/OLD", () =>
+      HttpResponse.json({ detail: "cannot delete OLD" }, { status: 500 }),
+    ),
+    ...fake.handlers,
+  ]);
+  await screen.findByLabelText("Target for BTC");
+  await user.click(screen.getByRole("button", { name: "Save targets" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "cannot delete OLD",
+  );
+});
