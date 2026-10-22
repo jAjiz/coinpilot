@@ -12,7 +12,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, SecretStr, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
 from core.db.types import CadenceMode
 
@@ -48,6 +48,14 @@ class CredentialsIn(BaseModel):
     # validation error; the handler in `api/app.py` does that.
     api_key: SecretStr = Field(min_length=1, max_length=256)
     api_secret: SecretStr = Field(min_length=1, max_length=512)
+
+    # Kraken's values are base64 and never hold whitespace, so any there came with a copy
+    # and paste, at the ends or where a phone wrapped a long value. Left in, Kraken refuses
+    # the key and the user cannot see why.
+    @field_validator("api_key", "api_secret", mode="before")
+    @classmethod
+    def _without_whitespace(cls, value: object) -> object:
+        return "".join(value.split()) if isinstance(value, str) else value
 
 
 class KeyAcceptedOut(BaseModel):
