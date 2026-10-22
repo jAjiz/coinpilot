@@ -15,3 +15,7 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # Node majors move by hand, LTS to LTS, together with web/.nvmrc.
+    ignore:
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
