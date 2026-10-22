@@ -19,6 +19,38 @@ function failureMessage(error: unknown): string {
   return refusalMessage(detail) ?? describeError(error);
 }
 
+// Shown in clear so a paste can be checked on a phone. The keyboard must not touch it:
+// a capitalised or "corrected" character makes Kraken refuse the key.
+function KeyField(props: {
+  id: string;
+  label: string;
+  hint: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      <Label htmlFor={props.id}>{props.label}</Label>
+      <Input
+        id={props.id}
+        type="text"
+        autoComplete="off"
+        autoCapitalize="none"
+        autoCorrect="off"
+        spellCheck={false}
+        required
+        aria-describedby={`${props.id}-hint`}
+        className="font-mono"
+        value={props.value}
+        onChange={(event) => props.onChange(event.target.value)}
+      />
+      <p id={`${props.id}-hint`} className="text-sm text-muted-foreground">
+        {props.hint}
+      </p>
+    </div>
+  );
+}
+
 export function KeyStep() {
   const status = useCredentialStatus();
   const advance = useAdvance();
@@ -118,28 +150,20 @@ export function KeyStep() {
         onSubmit={(event) => void submit(event)}
         className="flex flex-col gap-4"
       >
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="api-key">API key</Label>
-          <Input
-            id="api-key"
-            type="password"
-            autoComplete="off"
-            required
-            value={apiKey}
-            onChange={(event) => setApiKey(event.target.value)}
-          />
-        </div>
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="api-secret">Private key</Label>
-          <Input
-            id="api-secret"
-            type="password"
-            autoComplete="off"
-            required
-            value={apiSecret}
-            onChange={(event) => setApiSecret(event.target.value)}
-          />
-        </div>
+        <KeyField
+          id="api-key"
+          label="API key"
+          hint="Kraken's “API Key”: the shorter value."
+          value={apiKey}
+          onChange={setApiKey}
+        />
+        <KeyField
+          id="api-secret"
+          label="Private key"
+          hint="Kraken's “Private Key”: the longer value."
+          value={apiSecret}
+          onChange={setApiSecret}
+        />
         <FormError message={failure} />
         <Button type="submit" disabled={sending || !online}>
           {sending ? "Verifying with Kraken…" : "Verify & save"}

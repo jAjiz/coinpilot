@@ -31,6 +31,19 @@ def test_an_accepted_key_is_stored_encrypted(api, db_session, make_user, login, 
     assert app_context.cipher.unseal(user.id, sealed) == Credentials(KEY, SECRET)
 
 
+def test_whitespace_copied_with_the_key_is_dropped(api, db_session, make_user, login, app_context):
+    user = make_user()
+    # What a phone's copy and paste can add: a space, a line break inside a long value.
+    secret = f" {SECRET[:10]}\n{SECRET[10:]}\n"
+
+    response = _register(api, login(user), key=f"  {KEY} ", secret=secret)
+
+    assert response.status_code == 201
+    record = get_credentials(db_session, user.id)
+    sealed = Sealed(record.ciphertext, record.nonce, record.key_version)
+    assert app_context.cipher.unseal(user.id, sealed) == Credentials(KEY, SECRET)
+
+
 def test_the_answer_carries_the_permissions_and_never_the_key(api, make_user, login, fake_kraken):
     fake_kraken.ip_allowlist = ["203.0.113.7"]
 

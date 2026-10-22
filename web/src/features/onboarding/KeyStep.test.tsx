@@ -43,11 +43,22 @@ test("the four permissions are listed, with the withdrawal warning", async () =>
     ),
   ).toBeInTheDocument();
   expect(screen.queryByRole("link", { name: "Back" })).not.toBeInTheDocument();
-  expect(screen.getByLabelText("API key")).toHaveAttribute("type", "password");
-  expect(screen.getByLabelText("Private key")).toHaveAttribute(
-    "autocomplete",
-    "off",
-  );
+});
+
+test("both fields are visible, untouched by the keyboard, and say which Kraken value goes where", async () => {
+  renderAt("/onboarding/key", fakePlatform().handlers);
+  for (const [label, hint] of [
+    ["API key", "Kraken's “API Key”: the shorter value."],
+    ["Private key", "Kraken's “Private Key”: the longer value."],
+  ]) {
+    const field = await screen.findByLabelText(label);
+    expect(field).toHaveAttribute("type", "text");
+    expect(field).toHaveAttribute("autocomplete", "off");
+    expect(field).toHaveAttribute("autocapitalize", "none");
+    expect(field).toHaveAttribute("autocorrect", "off");
+    expect(field).toHaveAttribute("spellcheck", "false");
+    expect(field).toHaveAccessibleDescription(hint);
+  }
 });
 
 test("an accepted key moves on to the portfolio", async () => {
