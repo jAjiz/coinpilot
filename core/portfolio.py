@@ -41,6 +41,11 @@ class PortfolioView:
     managed_value: Decimal
     holdings: tuple[Holding, ...]
 
+    @property
+    def unpriced(self) -> tuple[str, ...]:
+        """Managed assets Kraken gave no price for. Valued at nothing, so no trade may run."""
+        return tuple(h.asset for h in self.holdings if h.managed and h.price is None)
+
     def snapshot_json(self) -> dict[str, object]:
         """The `holdings` column of a snapshot. Every number is a string."""
         return {
@@ -57,7 +62,9 @@ def build_view(
     targets: Mapping[str, Decimal],
     prices: Mapping[str, Decimal],
 ) -> PortfolioView:
-    """Raises `UnpricedAsset` when a managed asset has no price."""
+    """A managed asset with no price, its pair delisted say, is shown without a value or a
+    weight and left out of `managed_value`: the user can still see it and drop its target.
+    `unpriced` names it, so a caller about to trade can refuse."""
     tradable: dict[str, Decimal] = {}
     locked: dict[str, Decimal] = {}
     for key, amount in balances.items():
@@ -69,18 +76,19 @@ def build_view(
             locked[label] = locked.get(label, ZERO) + amount
 
     cash = tradable.pop(fiat, ZERO)
-    valuation = value_portfolio(tradable, prices, targets, cash)
+    priced = {asset: pct for asset, pct in targets.items() if asset in prices}
+    valuation = value_portfolio(tradable, prices, priced, cash)
 
     holdings: list[Holding] = [
         Holding(
             asset=asset,
             amount=tradable.get(asset, ZERO),
-            price=prices[asset],
-            value=valuation.asset_values[asset],
+            price=prices.get(asset),
+            value=valuation.asset_values.get(asset),
             managed=True,
             locked=False,
             target_pct=targets[asset],
-            weight_pct=valuation.weights[asset],
+            weight_pct=valuation.weights.get(asset),
         )
         for asset in sorted(targets)
     ]

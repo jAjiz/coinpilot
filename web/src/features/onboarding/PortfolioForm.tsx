@@ -29,6 +29,9 @@ type Row = {
   weight: string | null;
   managed: boolean;
   target: string;
+  // The stored target of an unpriced row: saving removes it, since Kraken no
+  // longer trades the asset against the fiat.
+  dropped: string | null;
   error: string | null;
 };
 
@@ -98,13 +101,20 @@ function initialRows(account: Account, stored: StoredAsset[]): Row[] {
       value: h.value,
       weight,
       managed: true,
+      dropped: null,
       error: null,
     };
     if (h.locked) {
       return { ...base, kind: "locked", managed: false, target: "" };
     }
     if (h.value === null) {
-      return { ...base, kind: "unpriced", managed: false, target: "" };
+      return {
+        ...base,
+        kind: "unpriced",
+        managed: false,
+        target: "",
+        dropped: storedTarget.get(h.asset) ?? null,
+      };
     }
     // Decision 4: the stored target for a managed holding, the weight otherwise.
     return {
@@ -159,6 +169,7 @@ function Rows({
         weight: null,
         managed: true,
         target: "",
+        dropped: null,
         error: null,
       },
     ]);
@@ -299,6 +310,8 @@ function Rows({
             {row.kind === "unpriced" && (
               <p className="text-sm">
                 Kraken has no {row.asset}/{fiat} price, so it cannot be managed.
+                {row.dropped !== null &&
+                  ` Its ${formatPercent(row.dropped)} target is removed when you save.`}
               </p>
             )}
             {row.kind === "locked" && (

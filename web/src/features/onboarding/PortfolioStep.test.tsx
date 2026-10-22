@@ -276,6 +276,38 @@ test("coming back keeps stored targets and deletes an asset switched off", async
   ]);
 });
 
+test("a managed asset Kraken no longer prices has its target removed", async () => {
+  const user = userEvent.setup();
+  const fake = platform({
+    portfolio: {
+      cash: "100",
+      holdings: [
+        holding("BTC", "300", { managed: true, target_pct: "50" }),
+        holding("SOL", null, { managed: true, target_pct: "20" }),
+      ],
+    },
+    assets: [
+      { asset: "BTC", pair: "BTC/EUR", target_pct: "50" },
+      { asset: "SOL", pair: "SOL/EUR", target_pct: "20" },
+    ],
+  });
+  renderAt("/onboarding/portfolio", fake.handlers);
+  await screen.findByLabelText("Target for BTC");
+  expect(
+    within(rowOf("SOL")).getByText(
+      "Kraken has no SOL/EUR price, so it cannot be managed. Its 20 % target is removed when you save.",
+    ),
+  ).toBeInTheDocument();
+  expect(screen.queryByLabelText("Target for SOL")).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Save targets" }));
+  await screen.findByRole("heading", { name: "Automation" });
+  expect(
+    fake.requests
+      .filter((r) => r.path.startsWith("/api/assets"))
+      .map((r) => [r.method, r.path]),
+  ).toEqual([["DELETE", "/api/assets/SOL"]]);
+});
+
 test("moving weight between two assets never passes 100 on the way", async () => {
   const user = userEvent.setup();
   const fake = platform({

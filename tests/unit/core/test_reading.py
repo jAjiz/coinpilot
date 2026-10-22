@@ -109,8 +109,9 @@ def test_any_read_that_fails_fails_the_whole_view(public, private, what):
         read_portfolio(public, private, "EUR", targets)
 
 
-def test_a_managed_asset_with_no_price_fails_the_view_and_names_it():
+def test_a_managed_asset_with_no_price_is_read_and_named():
     public = FakePublic(prices={})
 
-    with pytest.raises(PortfolioUnavailable, match="XBT"):
-        read_portfolio(public, FakePrivate({"XXBT": D("1"), "ZEUR": D("1")}), "EUR", XBT_60)
+    view = read_portfolio(public, FakePrivate({"XXBT": D("1"), "ZEUR": D("1")}), "EUR", XBT_60)
+
+    assert view.unpriced == ("XBT",)

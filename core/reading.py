@@ -12,7 +12,7 @@ from typing import Protocol
 
 from core.markets import TRADABLE_SUFFIXES, resolve_pair, split_balance_key
 from core.portfolio import PortfolioView, build_view
-from engine.types import ZERO, UnpricedAsset
+from engine.types import ZERO
 
 
 class PortfolioUnavailable(Exception):
@@ -57,7 +57,4 @@ def read_portfolio(public, private, fiat: str, assets: Iterable[ConfiguredAsset]
         raise PortfolioUnavailable("prices")
     prices = {asset: quotes[pair] for asset, pair in pair_of.items() if pair in quotes}
 
-    try:
-        return build_view(balances, names, fiat, targets, prices)
-    except UnpricedAsset as exc:
-        raise PortfolioUnavailable(f"a price for {exc.asset}") from None
+    return build_view(balances, names, fiat, targets, prices)

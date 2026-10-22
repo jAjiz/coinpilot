@@ -76,7 +76,8 @@ def test_a_failed_read_records_nothing(api, db_session, make_user, login, fake_k
     assert latest_snapshot(db_session, user.id) is None
 
 
-def test_a_managed_asset_with_no_price_records_nothing(api, db_session, make_user, login, fake_kraken):
+def test_a_managed_asset_with_no_price_is_recorded_unvalued(api, db_session, make_user, login, fake_kraken):
+    """A delisted pair must not block the portfolio: the user drops its target from there."""
     user = make_user()
     headers = login(user)
     _ready(api, headers)
@@ -85,9 +86,12 @@ def test_a_managed_asset_with_no_price_records_nothing(api, db_session, make_use
 
     response = api.post("/api/portfolio/refresh", headers=headers)
 
-    assert response.status_code == 503
-    assert "XBT" in response.json()["detail"]
-    assert latest_snapshot(db_session, user.id) is None
+    assert response.status_code == 200
+    xbt = next(holding for holding in response.json()["holdings"] if holding["asset"] == "XBT")
+    assert xbt["managed"] is True
+    assert xbt["target_pct"] is not None
+    assert (xbt["price"], xbt["value"], xbt["weight_pct"]) == (None, None, None)
+    assert latest_snapshot(db_session, user.id) is not None
 
 
 def test_a_stored_key_that_no_longer_opens_is_reported(api, db_session, make_user, login):
