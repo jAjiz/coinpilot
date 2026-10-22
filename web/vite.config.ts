@@ -16,6 +16,8 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
+    // Dates in unit tests are read in the platform's user zone.
+    env: { TZ: "Europe/Madrid" },
     setupFiles: ["src/test/setup.ts"],
     exclude: [...configDefaults.exclude, "e2e/**"],
   },

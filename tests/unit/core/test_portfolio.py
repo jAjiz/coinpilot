@@ -1,9 +1,6 @@
 from decimal import Decimal
 
-import pytest
-
 from core.portfolio import build_view
-from engine.types import UnpricedAsset
 
 D = Decimal
 NAMES = {"XXBT": "XBT", "XETH": "ETH", "ZEUR": "EUR", "SOL": "SOL"}
@@ -91,10 +88,28 @@ def test_a_managed_asset_with_nothing_held_is_still_shown():
     assert sol.weight_pct == D("0")
 
 
-def test_a_managed_asset_with_no_price_raises():
-    """Every weight would be wrong. The caller records nothing instead."""
-    with pytest.raises(UnpricedAsset):
-        _view({"ZEUR": D("100"), "XXBT": D("1")}, {"XBT": D("50")}, prices={})
+def test_a_managed_asset_with_no_price_is_shown_unvalued_and_named():
+    """Its pair delisted: the user must still see it to drop its target."""
+    view = _view(
+        {"ZEUR": D("100"), "XXBT": D("1"), "SOL": D("2")},
+        {"XBT": D("50"), "SOL": D("20")},
+        prices={"XBT": D("100")},
+    )
+
+    sol = _holding(view, "SOL")
+    assert sol.managed is True
+    assert sol.amount == D("2")
+    assert (sol.price, sol.value, sol.weight_pct) == (None, None, None)
+    assert sol.target_pct == D("20")
+    assert view.unpriced == ("SOL",)
+    # Left out of the value: the priced ones are weighed against each other and cash.
+    assert view.managed_value == D("200")
+    assert _holding(view, "XBT").weight_pct == D("50")
+    assert view.cash_target_pct == D("30")
+
+
+def test_a_fully_priced_view_names_nothing_unpriced():
+    assert _view({"ZEUR": D("100")}, {"XBT": D("50")}).unpriced == ()
 
 
 def test_the_cash_target_is_what_the_weights_leave():

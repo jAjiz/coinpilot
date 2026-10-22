@@ -303,6 +303,9 @@ def _plan(context: ExecutionContext, account: _Account, private) -> Planned:
     Raises `PortfolioUnavailable` when any read fails.
     """
     view = read_portfolio(context.public_kraken(), private, account.fiat, account.targets)
+    if view.unpriced:
+        # Every weight would be wrong. The user drops the target in the portfolio step.
+        raise PortfolioUnavailable(f"a price for {view.unpriced[0]}")
     metas = context.catalog.pairs()
     if metas is None:
         raise PortfolioUnavailable("asset pairs")
