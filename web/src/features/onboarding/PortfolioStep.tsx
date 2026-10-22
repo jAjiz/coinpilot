@@ -72,26 +72,16 @@ export function PortfolioStep() {
   const config = useConfig();
   const advance = useAdvance();
 
-  if (config.isPending) {
-    return (
-      <WizardLayout step="portfolio" title="Portfolio">
+  return (
+    <WizardLayout step="portfolio" title="Portfolio">
+      {config.isPending ? (
         <StepSkeleton />
-      </WizardLayout>
-    );
-  }
-  if (config.isError) {
-    return (
-      <WizardLayout step="portfolio" title="Portfolio">
+      ) : config.isError ? (
         <StepFailed
           error={config.error}
           onRetry={() => void config.refetch()}
         />
-      </WizardLayout>
-    );
-  }
-  return (
-    <WizardLayout step="portfolio" title="Portfolio">
-      {config.data === null ? (
+      ) : config.data === null ? (
         <CurrencyForm />
       ) : (
         <>

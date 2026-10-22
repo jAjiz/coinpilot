@@ -40,10 +40,13 @@ export function localDate(at: Date): string {
   return `${pad(at.getFullYear(), 4)}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
 }
 
-// A date the form can send: YYYY-MM-DD with a year from 2000 to 9999.
+// A date the form can send: a real YYYY-MM-DD day with a year from 2000 to 9999.
 export function isUsableDate(date: string): boolean {
-  const match = /^(\d{4})-\d{2}-\d{2}$/.exec(date);
-  return match !== null && Number(match[1]) >= 2000;
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (match === null || Number(match[1]) < 2000) return false;
+  const [y, m, d] = match.slice(1).map(Number);
+  // new Date() rolls an impossible day (02-31) over into the next month.
+  return localDate(new Date(y, m - 1, d)) === date;
 }
 
 export function localNoon(date: string): string {
@@ -122,7 +125,6 @@ export function readInvest(
 
 export function readRebalance(
   fields: CadenceFields,
-  _today: string,
 ): CadenceForm<RebalanceChoice> {
   return readInterval(fields, REBALANCE);
 }

@@ -40,11 +40,14 @@ export function saveOrder(
   wanted: Map<string, string>,
 ): { deletes: string[]; puts: { asset: string; target: string }[] } {
   const deletes = [...stored.keys()].filter((asset) => !wanted.has(asset));
-  const puts = [...wanted].map(([asset, target]) => ({
-    asset,
-    target,
-    change: Big(target).minus(stored.get(asset) ?? "0"),
-  }));
+  // A target that is already stored as it is needs no write.
+  const puts = [...wanted]
+    .map(([asset, target]) => ({
+      asset,
+      target,
+      change: Big(target).minus(stored.get(asset) ?? "0"),
+    }))
+    .filter(({ asset, change }) => !stored.has(asset) || !change.eq(0));
   puts.sort((a, b) => a.change.cmp(b.change) || a.asset.localeCompare(b.asset));
   return {
     deletes,

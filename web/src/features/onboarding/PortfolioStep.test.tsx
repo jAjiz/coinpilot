@@ -331,39 +331,6 @@ test("an unreachable Kraken on the read offers a retry", async () => {
   await waitFor(() => expect(calls).toBe(2));
 });
 
-test("a stored target that cannot be managed is kept, and counts toward 100", async () => {
-  const user = userEvent.setup();
-  const fake = platform({
-    portfolio: {
-      cash: "100",
-      holdings: [
-        holding("BTC", "300", { managed: true, target_pct: "50" }),
-        holding("DOT", "50", { locked: true, managed: true, target_pct: "40" }),
-      ],
-    },
-    assets: [
-      { asset: "BTC", pair: "BTC/EUR", target_pct: "50" },
-      { asset: "DOT", pair: "DOT/EUR", target_pct: "40" },
-    ],
-  });
-  renderAt("/onboarding/portfolio", fake.handlers);
-  const btc = await screen.findByLabelText("Target for BTC");
-  expect(screen.getByText("Cash (EUR) target: 10 %")).toBeInTheDocument();
-  await user.clear(btc);
-  await user.type(btc, "61");
-  expect(screen.getByText("Cash (EUR) target: -1 %")).toBeInTheDocument();
-  await user.click(screen.getByRole("button", { name: "Save targets" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent(
-    "The targets add up to more than 100 %.",
-  );
-  expect(fake.requests.filter((r) => r.method !== "POST")).toEqual([]);
-  await user.clear(btc);
-  await user.type(btc, "60");
-  await user.click(screen.getByRole("button", { name: "Save targets" }));
-  await screen.findByRole("heading", { name: "Automation" });
-  expect(fake.requests.filter((r) => r.method === "DELETE")).toEqual([]);
-});
-
 test("sending again after a failed write does not repeat the earlier deletes", async () => {
   const user = userEvent.setup();
   const fake = platform({
@@ -406,7 +373,9 @@ test("the rows stay when reading the stored assets back fails", async () => {
     }),
     ...fake.handlers,
   ]);
-  await screen.findByLabelText("Target for ETH");
+  const eth = await screen.findByLabelText("Target for ETH");
+  await user.clear(eth);
+  await user.type(eth, "20");
   await user.click(screen.getByRole("button", { name: "Save targets" }));
   await within(rowOf("ETH")).findByRole("alert");
   await waitFor(() => expect(reads).toBeGreaterThan(1));

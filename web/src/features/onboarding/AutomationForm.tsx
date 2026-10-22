@@ -18,7 +18,7 @@ import {
   type RebalanceChoice,
 } from "@/lib/cadence";
 import { compare, parseDecimal } from "@/lib/decimal";
-import { ordinal, weekdayName } from "@/lib/summary";
+import { ordinal, shortMonthNote, weekdayName } from "@/lib/summary";
 import type { AutomationValues } from "./automationValues";
 
 const INVEST_OPTIONS: [InvestChoice, string][] = [
@@ -47,9 +47,7 @@ function investHint(date: string, choice: InvestChoice): string | null {
   if (choice === "weekly") return `Runs every ${weekdayName(date)}.`;
   if (choice === "monthly") {
     const day = Number(date.split("-")[2]);
-    return `Runs on the ${ordinal(day)} of each month${
-      day >= 29 ? "; in a shorter month, on its last day" : ""
-    }.`;
+    return `Runs on the ${ordinal(day)} of each month${shortMonthNote(day)}.`;
   }
   return null;
 }

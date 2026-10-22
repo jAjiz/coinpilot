@@ -125,7 +125,7 @@ test("the weekday and the day of the month are told", async () => {
   pickDate("Invest start date", "2026-01-31");
   expect(
     await screen.findByText(
-      "Runs on the 31st of each month; in a shorter month, on its last day.",
+      "Runs on the 31st of each month (or the last day of a shorter month).",
     ),
   ).toBeInTheDocument();
 });
@@ -306,7 +306,7 @@ test("the platform's refusal is shown", async () => {
   expect(save()).toBeEnabled();
 });
 
-test("a configuration still at the platform's default shows the wizard's defaults", async () => {
+test("values saved while the rebalance cadence is still MIN are shown", async () => {
   await open(
     platform({
       invest_cash_enabled: true,
@@ -315,18 +315,21 @@ test("a configuration still at the platform's default shows the wizard's default
       min_order_fiat: "25",
     }),
   );
+  // Only the rebalance cadence, never saved by the wizard, takes its default.
+  expect(screen.getByLabelText("Invest cadence")).toHaveValue("asap");
+  expect(screen.getByLabelText("Rebalance cadence")).toHaveValue("quarterly");
   expect(
     screen.getByRole("switch", { name: "Invest free cash automatically" }),
-  ).not.toBeChecked();
+  ).toBeChecked();
   expect(
     screen.getByRole("switch", {
       name: "Rebalance automatically, without asking",
     }),
-  ).not.toBeChecked();
+  ).toBeChecked();
   expect(
     screen.getByLabelText("Rebalance only when an asset drifts more than"),
-  ).toHaveValue("1");
-  expect(screen.getByLabelText("Skip orders smaller than")).toHaveValue("0");
+  ).toHaveValue("5");
+  expect(screen.getByLabelText("Skip orders smaller than")).toHaveValue("25");
 });
 
 test("as soon as possible is sent as the minimum cadence", async () => {

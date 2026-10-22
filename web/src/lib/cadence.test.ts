@@ -76,7 +76,7 @@ test("every choice reads back as itself", () => {
     "yearly",
   ];
   for (const choice of rebalance) {
-    expect(readRebalance(rebalanceFields(choice, date), "2030-01-01")).toEqual({
+    expect(readRebalance(rebalanceFields(choice, date))).toEqual({
       kind: "choice",
       choice,
       date,
@@ -88,15 +88,12 @@ test("a cadence the select cannot express is custom", () => {
   const custom = { kind: "custom" };
   const noon = investFields("daily", "2026-03-29").cadence_anchor;
   expect(
-    readRebalance(
-      {
-        mode: "MIN",
-        interval_days: null,
-        interval_months: null,
-        cadence_anchor: null,
-      },
-      "2026-03-29",
-    ),
+    readRebalance({
+      mode: "MIN",
+      interval_days: null,
+      interval_months: null,
+      cadence_anchor: null,
+    }),
   ).toEqual(custom);
   expect(
     readInvest(

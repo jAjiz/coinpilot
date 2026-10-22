@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { ApiError, api, describeError, unwrap } from "@/api/client";
 import { useCredentialStatus } from "@/api/queries";
 import type { components } from "@/api/schema";
@@ -61,21 +61,16 @@ export function KeyStep() {
     }
   }
 
-  if (status.isPending) {
-    return (
-      <WizardLayout step="key" title="Kraken key">
-        <StepSkeleton />
-      </WizardLayout>
-    );
-  }
+  const layout = (children: ReactNode) => (
+    <WizardLayout step="key" title="Kraken key">
+      {children}
+    </WizardLayout>
+  );
+
+  if (status.isPending) return layout(<StepSkeleton />);
   if (status.isError) {
-    return (
-      <WizardLayout step="key" title="Kraken key">
-        <StepFailed
-          error={status.error}
-          onRetry={() => void status.refetch()}
-        />
-      </WizardLayout>
+    return layout(
+      <StepFailed error={status.error} onRetry={() => void status.refetch()} />,
     );
   }
 
@@ -86,8 +81,8 @@ export function KeyStep() {
       })
     : null;
 
-  return (
-    <WizardLayout step="key" title="Kraken key">
+  return layout(
+    <>
       <p>
         CoinPilot trades on your Kraken account through an API key. In Kraken,
         open Settings → API and create a key with exactly these permissions:
@@ -174,6 +169,6 @@ export function KeyStep() {
           </Button>
         </div>
       )}
-    </WizardLayout>
+    </>,
   );
 }

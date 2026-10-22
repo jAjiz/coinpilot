@@ -18,7 +18,7 @@ function Summary({ config, today }: { config: Config; today: string }) {
   const [sending, setSending] = useState(false);
 
   const invest = readInvest(cadenceOf(config, "invest"), today);
-  const rebalance = readRebalance(cadenceOf(config, "rebalance"), today);
+  const rebalance = readRebalance(cadenceOf(config, "rebalance"));
   const sentences = summarize({
     fiat: config.fiat,
     invest,
@@ -88,6 +88,9 @@ export function SummaryStep() {
         />
       ) : config.data === null ? (
         <p>Choose a currency in the portfolio step first.</p>
+      ) : config.data.rebalance_cadence_mode === "MIN" ? (
+        // The automation step always saves an interval: MIN means it was not saved.
+        <p>Save the automation step first.</p>
       ) : (
         <Summary config={config.data} today={today} />
       )}

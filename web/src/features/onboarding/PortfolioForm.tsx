@@ -29,8 +29,6 @@ type Row = {
   weight: string | null;
   managed: boolean;
   target: string;
-  // The stored target of a row that cannot be managed: it stays as it is.
-  kept: string | null;
   error: string | null;
 };
 
@@ -94,7 +92,6 @@ function initialRows(account: Account, stored: StoredAsset[]): Row[] {
   const weights = prefillWeights(account.cash, account.holdings);
   const storedTarget = new Map(stored.map((s) => [s.asset, s.target_pct]));
   return account.holdings.map((h): Row => {
-    const kept = storedTarget.get(h.asset) ?? null;
     const weight = weights.get(h.asset) ?? null;
     const base = {
       asset: h.asset,
@@ -104,17 +101,16 @@ function initialRows(account: Account, stored: StoredAsset[]): Row[] {
       error: null,
     };
     if (h.locked) {
-      return { ...base, kind: "locked", managed: false, target: "", kept };
+      return { ...base, kind: "locked", managed: false, target: "" };
     }
     if (h.value === null) {
-      return { ...base, kind: "unpriced", managed: false, target: "", kept };
+      return { ...base, kind: "unpriced", managed: false, target: "" };
     }
     // Decision 4: the stored target for a managed holding, the weight otherwise.
     return {
       ...base,
       kind: "tradable",
-      target: kept ?? weight ?? "0",
-      kept: null,
+      target: storedTarget.get(h.asset) ?? weight ?? "0",
     };
   });
 }
@@ -163,14 +159,12 @@ function Rows({
         weight: null,
         managed: true,
         target: "",
-        kept: null,
         error: null,
       },
     ]);
   }
 
   const targets = rows.flatMap((row) => {
-    if (row.kept !== null) return [row.kept];
     const target = row.managed ? validTarget(row.target) : null;
     return target === null ? [] : [target];
   });
@@ -191,8 +185,7 @@ function Rows({
 
     const wanted = new Map<string, string>();
     for (const row of checked) {
-      if (row.kept !== null) wanted.set(row.asset, row.kept);
-      else if (row.kind === "tradable" && row.managed) {
+      if (row.kind === "tradable" && row.managed) {
         wanted.set(row.asset, validTarget(row.target)!);
       }
     }
@@ -239,9 +232,17 @@ function Rows({
       // again starts from what is stored.
       await client.invalidateQueries({ queryKey: assetsKey });
     }
+    if (failedAt !== null) {
+      setSaving(false);
+      return;
+    }
     // Stays disabled while the step advances: a second tap would send again.
-    if (failedAt === null) await onSaved();
-    else setSaving(false);
+    try {
+      await onSaved();
+    } catch (error) {
+      setFormError(describeError(error));
+      setSaving(false);
+    }
   }
 
   return (

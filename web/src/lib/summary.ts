@@ -81,8 +81,9 @@ export function startsLater(
 
 const CUSTOM = "On a custom schedule";
 
-function late(date: Date): string {
-  return date.getDate() >= 29 ? " (or the last day of a shorter month)" : "";
+// A monthly run on the 29th or later falls on a shorter month's last day.
+export function shortMonthNote(day: number): string {
+  return day >= 29 ? " (or the last day of a shorter month)" : "";
 }
 
 function investWhen(form: CadenceForm<InvestChoice>): string {
@@ -96,7 +97,7 @@ function investWhen(form: CadenceForm<InvestChoice>): string {
     case "weekly":
       return `Every ${WEEKDAYS[date.getDay()]} at 12:00`;
     case "monthly":
-      return `On the ${ordinal(date.getDate())} of every month at 12:00${late(date)}`;
+      return `On the ${ordinal(date.getDate())} of every month at 12:00${shortMonthNote(date.getDate())}`;
   }
 }
 
@@ -106,11 +107,11 @@ function rebalanceWhen(form: CadenceForm<RebalanceChoice>): string {
   const d = ordinal(date.getDate());
   switch (form.choice) {
     case "monthly":
-      return `On the ${d} of every month${late(date)}`;
+      return `On the ${d} of every month${shortMonthNote(date.getDate())}`;
     case "quarterly":
-      return `On the ${d} of every quarter${late(date)}`;
+      return `On the ${d} of every quarter${shortMonthNote(date.getDate())}`;
     case "half-yearly":
-      return `On the ${d} every six months${late(date)}`;
+      return `On the ${d} every six months${shortMonthNote(date.getDate())}`;
     case "yearly":
       return `Every year on ${date.getDate()} ${MONTHS[date.getMonth()]}`;
   }

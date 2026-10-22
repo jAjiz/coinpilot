@@ -7,6 +7,7 @@ import {
   type InvestChoice,
   type RebalanceChoice,
 } from "@/lib/cadence";
+import { compare } from "@/lib/decimal";
 
 export type AutomationValues = {
   invest: CadenceForm<InvestChoice>;
@@ -18,11 +19,24 @@ export type AutomationValues = {
   min_order_fiat: string;
 };
 
-// While the rebalance cadence is still the platform's default (MIN), nothing
-// was saved by the wizard: every value is the wizard's own default. Once it is
-// INTERVAL, every value is the saved one.
+// A configuration still entirely at the platform's defaults was never saved:
+// it starts from the wizard's own defaults. Otherwise every saved value is
+// shown, and only a rebalance cadence still at MIN (the wizard always saves an
+// interval) takes the wizard's default.
+function untouched(config: Config): boolean {
+  return (
+    config.invest_cadence_mode === "MIN" &&
+    config.rebalance_cadence_mode === "MIN" &&
+    !config.invest_cash_enabled &&
+    !config.cash_rebalance_enabled &&
+    !config.auto_rebalance_enabled &&
+    compare(config.min_drift_pct, "0") === 0 &&
+    compare(config.min_order_fiat, "0") === 0
+  );
+}
+
 export function wizardValues(config: Config, today: string): AutomationValues {
-  if (config.rebalance_cadence_mode === "MIN") {
+  if (untouched(config)) {
     return {
       invest: { kind: "choice", choice: "monthly", date: today },
       rebalance: { kind: "choice", choice: "quarterly", date: today },
@@ -35,7 +49,10 @@ export function wizardValues(config: Config, today: string): AutomationValues {
   }
   return {
     invest: readInvest(cadenceOf(config, "invest"), today),
-    rebalance: readRebalance(cadenceOf(config, "rebalance"), today),
+    rebalance:
+      config.rebalance_cadence_mode === "MIN"
+        ? { kind: "choice", choice: "quarterly", date: today }
+        : readRebalance(cadenceOf(config, "rebalance")),
     invest_cash_enabled: config.invest_cash_enabled,
     cash_rebalance_enabled: config.cash_rebalance_enabled,
     auto_rebalance_enabled: config.auto_rebalance_enabled,
