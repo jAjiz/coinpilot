@@ -1,5 +1,5 @@
 # The application: built here, served by the platform (spec §4.1).
-FROM node:24-trixie-slim AS web
+FROM node:25-trixie-slim AS web
 WORKDIR /web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
