@@ -282,6 +282,17 @@ def test_an_unreadable_balance_sends_nothing_and_is_recorded(app_context, db_ses
     assert list_evaluations(db_session, user.id)[0].status == "KRAKEN_UNAVAILABLE"
 
 
+def test_a_managed_asset_with_no_price_sends_nothing(app_context, db_session, fake_kraken, ready):
+    """Its pair delisted: every weight would be wrong, so nothing is traded."""
+    user = ready()
+    del fake_kraken.prices["XETHZEUR"]
+
+    result = invest(app_context, user.id)
+
+    assert result.status is EvaluationStatus.KRAKEN_UNAVAILABLE
+    assert fake_kraken.placed == []
+
+
 def test_a_preview_has_kraken_validate_and_records_nothing(app_context, db_session, fake_kraken, ready):
     user = ready()
 
