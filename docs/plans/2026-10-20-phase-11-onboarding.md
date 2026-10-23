@@ -712,3 +712,21 @@ With defaults nothing is traded: investing is off and a rebalance only proposes.
    runs fall between 12:00 and 13:00 your time.
 5. Press Start: Home opens. Reload: you stay on Home, onboarding does not come back.
 6. In `/api/docs`, `GET /api/config` shows `onboarded_at` set and the cadences you chose.
+
+## What the manual check showed (2026-10-22 and 2026-10-23)
+
+Production runs `6891555`: phase 11, the key-step fix
+([#52](https://github.com/jAjiz/coinpilot/pull/52)) and fastapi 0.148. Every step passed.
+
+| Step | Result |
+|---|---|
+| 1. Deploy and sign in | Passed. |
+| 2. The real key | The first attempt, on `3553545`, was refused as "Kraken did not accept this key". Both fields were hidden and nothing removed whitespace, so a space or line break copied with a value was the likely cause; the logs write the same line for an `EAPI` refusal and an undecodable secret. #52 shows both fields in clear with Kraken's names and drops whitespace before validating. On `6891555` the key was accepted, and it is restricted in Kraken to the server's address. |
+| 3. Fiat and holdings | Passed: holdings listed with today's values and weights. This closes phase 9's pending check. |
+| 4. Cadence and summary | Passed. |
+| 5. Start | Passed: Home opens and stays after a reload. |
+| 6. `GET /api/config` | Passed: `onboarded_at` set, the chosen cadences stored. |
+
+Phase 8's step 7 is half closed: the key is restricted to the server. Still pending from
+phase 8: rotating the master key with this record, and deleting the key from the
+development database.
