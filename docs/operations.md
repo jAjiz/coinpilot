@@ -144,7 +144,7 @@ Rotate when the key may have been exposed, and when someone who knew it no longe
 5. `./compose.sh run --rm platform python scripts/rotate_master_key.py --check` —
    expect `not under it : 0`.
 6. Remove `1:<old>,` from `CREDENTIAL_KEYS`, and recreate the platform again as in 3.
-7. `GET /portfolio` reads your balance: the record opens with the new key alone. Only now
+7. `GET /api/portfolio` reads your balance: the record opens with the new key alone. Only now
    delete the old key from your password manager. Dumps taken before step 4 still need
    it; keep it while a dump or a copy of the disk holds one.
 

@@ -1987,3 +1987,14 @@ through the UI, so the first onboarding is also its test.
 | 5. Deploy and roll back | `7bcec93` deployed (dump, no migration to apply), rolled back to `8cf8148` (no dump and no `alembic` line in the log), deployed again. `releases` holds the four starts in order and `backups/` three dumps; PostgreSQL ran throughout. Memory after three recreations: 474 MiB used of 952, 71 MiB of swap. |
 | 6. Reboot | A full stop and start of the VM, not `sudo reboot`: Claude's session cannot open the IAP tunnel. Both containers came back healthy on their own and the swap was on. The stop took 74 s; Compute Engine allows about 90 s, less than `stop_grace_period`, which spec §13 now says. |
 | 7. Close the doors | **Pending**, with step 3: restrict the key to `my-vps`'s address, delete it from the development database. |
+
+## Closing the pending steps (2026-10-23)
+
+The operator registered the real key through phase 11's onboarding on `6891555` (its
+manual check is recorded in that plan).
+
+| Step | Result |
+|---|---|
+| 3. First deploy | Kraken, `/api/portfolio` and the rest of the read path work with the real key, through the onboarding. |
+| 4. Rotation | Done on `6891555` by the operator, following runbook §7, with the real record. |
+| 7. Close the doors | The key is restricted in Kraken to `my-vps`'s address. The development database's key (validated 2026-10-01) is deleted, and its table vacuumed. |
