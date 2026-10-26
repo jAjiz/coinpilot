@@ -1,10 +1,13 @@
 import { http, HttpResponse, type HttpHandler, type JsonBodyType } from "msw";
 import type { components } from "@/api/schema";
-import type { Config } from "@/api/queries";
+import type { Config, Portfolio, Proposal } from "@/api/queries";
 import { compare, sum } from "@/lib/decimal";
 
 type HoldingOut = components["schemas"]["HoldingOut"];
 type ConfigPatch = components["schemas"]["ConfigPatch"];
+type InvestOut = components["schemas"]["InvestOut"];
+type RebalanceOut = components["schemas"]["RebalanceOut"];
+type LegOut = components["schemas"]["LegOut"];
 
 export type FakeState = {
   config: Config | null; // null: no settings yet (GET -> 404)
@@ -13,6 +16,13 @@ export type FakeState = {
   portfolio: { cash: string; holdings: HoldingOut[] }; // what a refresh returns
   untradable: string[]; // PUT -> 422 "kraken has no tradable {X}/{fiat} pair"
   keyReply: { status: number; body: unknown }; // POST /api/credentials
+  snapshot: Portfolio | null; // GET /api/portfolio; null -> 404
+  proposal: Proposal | null; // GET /api/proposal; null -> 404
+  investPreview: InvestOut; // POST /api/invest?preview=true
+  investResult: InvestOut; // POST /api/invest
+  rebalanceResult: RebalanceOut; // POST /api/rebalance; its proposal becomes live
+  // POST /api/proposal/approve; unset: DONE, every order of the live proposal FILLED
+  approveResult?: RebalanceOut;
   nextInvestAt: string;
   nextRebalanceAt: string;
 };
@@ -41,6 +51,26 @@ const DEFAULTS: FakeState = {
       unnecessary: [],
     },
   },
+  snapshot: null,
+  proposal: null,
+  investPreview: {
+    status: "NOTHING_TO_DO",
+    preview: true,
+    legs: [],
+    messages: ["there is no free cash to invest"],
+  },
+  investResult: {
+    status: "NOTHING_TO_DO",
+    preview: false,
+    legs: [],
+    messages: ["there is no free cash to invest"],
+  },
+  rebalanceResult: {
+    status: "NOTHING_TO_DO",
+    legs: [],
+    proposal: null,
+    messages: ["the drift is below the threshold"],
+  },
   nextInvestAt: "2026-10-26T11:20:00Z",
   nextRebalanceAt: "2026-11-01T11:20:00Z",
 };
@@ -62,6 +92,30 @@ const DEFAULT_CONFIG = {
   rebalance_cadence_anchor: null,
 } as const;
 
+// Every order of the proposal (a leg without a note), filled as asked.
+function filled(proposal: Proposal): RebalanceOut {
+  const legs = proposal.legs
+    .filter((leg) => leg.note === null)
+    .map((leg): LegOut => ({
+      asset: leg.asset,
+      pair: leg.pair,
+      side: leg.side,
+      amount_fiat: leg.amount_fiat,
+      minimum_fiat: leg.minimum_fiat,
+      status: "FILLED",
+      cl_ord_id: null,
+      txid: null,
+      cost: null,
+      executed_volume: null,
+      executed_price: null,
+      fee: null,
+      error: null,
+      note: null,
+      volume: null,
+    }));
+  return { status: "DONE", legs, proposal: null, messages: [] };
+}
+
 function detail(status: number, message: string) {
   return HttpResponse.json({ detail: message }, { status });
 }
@@ -80,9 +134,10 @@ export function fakePlatform(initial: Partial<FakeState> = {}): {
   async function record(request: Request): Promise<unknown> {
     const text = await request.text();
     const body: unknown = text === "" ? null : JSON.parse(text);
+    const url = new URL(request.url);
     requests.push({
       method: request.method,
-      path: new URL(request.url).pathname,
+      path: url.pathname + url.search,
       body,
     });
     return body;
@@ -196,6 +251,61 @@ export function fakePlatform(initial: Partial<FakeState> = {}): {
       return new HttpResponse(null, { status: 204 });
     }),
 
+    http.get("/api/portfolio", () =>
+      state.snapshot === null
+        ? detail(
+            404,
+            "no snapshot yet; POST /api/portfolio/refresh to take one",
+          )
+        : HttpResponse.json(state.snapshot),
+    ),
+    http.get("/api/proposal", () =>
+      state.proposal === null
+        ? detail(404, "there is no live proposal")
+        : HttpResponse.json(state.proposal),
+    ),
+    http.delete("/api/proposal", async ({ request }) => {
+      await record(request);
+      if (state.proposal === null) {
+        return detail(404, "there is no live proposal");
+      }
+      state.proposal = null;
+      return new HttpResponse(null, { status: 204 });
+    }),
+
+    http.post("/api/proposal/approve", async ({ request }) => {
+      const body = (await record(request)) as { version: number };
+      if (state.proposal === null) {
+        return detail(404, "there is no live proposal");
+      }
+      if (body.version !== state.proposal.version) {
+        return HttpResponse.json(
+          {
+            detail: "that is not the live version; read the proposal again",
+            proposal: state.proposal,
+          },
+          { status: 409 },
+        );
+      }
+      const result = state.approveResult ?? filled(state.proposal);
+      state.proposal = null;
+      return HttpResponse.json(result);
+    }),
+
+    http.post("/api/invest", async ({ request }) => {
+      await record(request);
+      const preview = new URL(request.url).searchParams.get("preview");
+      return HttpResponse.json(
+        preview === "true" ? state.investPreview : state.investResult,
+      );
+    }),
+
+    http.post("/api/rebalance", async ({ request }) => {
+      await record(request);
+      state.proposal = state.rebalanceResult.proposal;
+      return HttpResponse.json(state.rebalanceResult);
+    }),
+
     http.post("/api/portfolio/refresh", async ({ request }) => {
       await record(request);
       if (state.config === null) return detail(409, "no settings yet");
@@ -224,7 +334,7 @@ export function fakePlatform(initial: Partial<FakeState> = {}): {
         state.portfolio.cash,
         ...holdings.map((h) => h.value ?? "0"),
       ]);
-      return HttpResponse.json({
+      const snapshot: Portfolio = {
         as_of: "2026-10-20T10:00:00Z",
         fiat: state.config.fiat,
         total_value: total,
@@ -232,7 +342,9 @@ export function fakePlatform(initial: Partial<FakeState> = {}): {
         cash_target_pct: cashTarget(),
         cash_weight_pct: null,
         holdings,
-      });
+      };
+      state.snapshot = snapshot;
+      return HttpResponse.json(snapshot);
     }),
   ];
 

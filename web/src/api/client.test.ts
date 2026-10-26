@@ -1,7 +1,13 @@
 import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { server } from "@/test/server";
-import { ApiError, api, onSessionEnded, unwrap } from "./client";
+import {
+  ApiError,
+  api,
+  onSessionEnded,
+  operationError,
+  unwrap,
+} from "./client";
 
 let refreshCalls = 0;
 let refreshed = false;
@@ -173,4 +179,37 @@ test("a non-JSON failure with no status text still has a message", async () => {
   ).catch((e: unknown) => e);
   expect(error).toBeInstanceOf(ApiError);
   expect((error as ApiError).message).toBe("The platform answered 502.");
+});
+
+test("a busy platform gets the spec's sentence, an unresolved order keeps its own", () => {
+  expect(
+    operationError(
+      new ApiError(
+        409,
+        "an evaluation of this account is already running; try again shortly",
+        null,
+      ),
+    ),
+  ).toBe("An operation is already running; try again in a moment.");
+  expect(
+    operationError(
+      new ApiError(
+        409,
+        "an earlier order is still unresolved; try again in a few minutes",
+        null,
+      ),
+    ),
+  ).toBe("an earlier order is still unresolved; try again in a few minutes");
+});
+
+test("an unreachable Kraken says nothing was changed", () => {
+  expect(
+    operationError(new ApiError(503, "kraken could not be read", null)),
+  ).toBe("Kraken didn't answer; nothing was changed.");
+});
+
+test("a failed connection is told as such", () => {
+  expect(operationError(new TypeError("Failed to fetch"))).toBe(
+    "The connection failed.",
+  );
 });
