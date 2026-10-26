@@ -101,3 +101,20 @@ export async function unwrap<T>(
   }
   return data as T;
 }
+
+// The detail api/evaluation.py answers with while another evaluation of the
+// account runs. Keep it identical to the platform's text.
+const BUSY_DETAIL =
+  "an evaluation of this account is already running; try again shortly";
+
+export function operationError(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.status === 409 && error.detail === BUSY_DETAIL) {
+      return "An operation is already running; try again in a moment.";
+    }
+    if (error.status === 503) {
+      return "Kraken didn't answer; nothing was changed.";
+    }
+  }
+  return describeError(error);
+}
