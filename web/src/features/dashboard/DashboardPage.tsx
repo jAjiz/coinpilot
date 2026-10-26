@@ -2,6 +2,7 @@ import { AccountValue } from "./AccountValue";
 import { Allocation } from "./Allocation";
 import { InvestNow } from "./InvestNow";
 import { ProposalCard } from "./ProposalCard";
+import { RebalanceNow } from "./RebalanceNow";
 
 export function DashboardPage() {
   return (
@@ -11,6 +12,7 @@ export function DashboardPage() {
       <AccountValue />
       <Allocation />
       <InvestNow />
+      <RebalanceNow />
     </div>
   );
 }

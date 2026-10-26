@@ -6,6 +6,7 @@ import { compare, sum } from "@/lib/decimal";
 type HoldingOut = components["schemas"]["HoldingOut"];
 type ConfigPatch = components["schemas"]["ConfigPatch"];
 type InvestOut = components["schemas"]["InvestOut"];
+type RebalanceOut = components["schemas"]["RebalanceOut"];
 
 export type FakeState = {
   config: Config | null; // null: no settings yet (GET -> 404)
@@ -18,6 +19,7 @@ export type FakeState = {
   proposal: Proposal | null; // GET /api/proposal; null -> 404
   investPreview: InvestOut; // POST /api/invest?preview=true
   investResult: InvestOut; // POST /api/invest
+  rebalanceResult: RebalanceOut; // POST /api/rebalance; its proposal becomes live
   nextInvestAt: string;
   nextRebalanceAt: string;
 };
@@ -59,6 +61,12 @@ const DEFAULTS: FakeState = {
     preview: false,
     legs: [],
     messages: ["there is no free cash to invest"],
+  },
+  rebalanceResult: {
+    status: "NOTHING_TO_DO",
+    legs: [],
+    proposal: null,
+    messages: ["the drift is below the threshold"],
   },
   nextInvestAt: "2026-10-26T11:20:00Z",
   nextRebalanceAt: "2026-11-01T11:20:00Z",
@@ -244,6 +252,12 @@ export function fakePlatform(initial: Partial<FakeState> = {}): {
       return HttpResponse.json(
         preview === "true" ? state.investPreview : state.investResult,
       );
+    }),
+
+    http.post("/api/rebalance", async ({ request }) => {
+      await record(request);
+      state.proposal = state.rebalanceResult.proposal;
+      return HttpResponse.json(state.rebalanceResult);
     }),
 
     http.post("/api/portfolio/refresh", async ({ request }) => {
