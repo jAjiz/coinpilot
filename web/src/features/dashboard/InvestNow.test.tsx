@@ -321,3 +321,87 @@ test("a failed refresh after filled orders is said", async () => {
     ),
   ).toBeInTheDocument();
 });
+
+test("an unchecked leg is counted, since it is sent too", async () => {
+  const user = userEvent.setup();
+  const fake = platform({
+    investPreview: out(
+      "PREVIEW",
+      [leg("BTC", "60", "VALIDATED"), leg("ETH", "40", "UNCHECKED")],
+      true,
+    ),
+  });
+  renderAt("/", fake.handlers);
+  await user.click(await openButton());
+  expect(await screen.findByText("Total €100.00")).toBeInTheDocument();
+  expect(
+    screen.getByText(
+      "Kraken could not check every order; the unchecked ones are sent too.",
+    ),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByRole("button", { name: "Confirm: invest €100.00" }),
+  ).toBeInTheDocument();
+});
+
+test("with every leg unchecked the invest is still offered", async () => {
+  const user = userEvent.setup();
+  const fake = platform({
+    investPreview: out(
+      "PREVIEW",
+      [leg("BTC", "60", "UNCHECKED"), leg("ETH", "40", "UNCHECKED")],
+      true,
+    ),
+  });
+  renderAt("/", fake.handlers);
+  await user.click(await openButton());
+  expect(
+    await screen.findByRole("button", { name: "Confirm: invest €100.00" }),
+  ).toBeInTheDocument();
+  expect(
+    screen.queryByText("Kraken would accept none of these orders."),
+  ).toBeNull();
+});
+
+test("a checked preview does not mention unchecked orders", async () => {
+  const user = userEvent.setup();
+  const fake = platform({ investPreview: out("PREVIEW", accepted(), true) });
+  renderAt("/", fake.handlers);
+  await user.click(await openButton());
+  await screen.findByText("Total €100.00");
+  expect(screen.queryByText(/could not check every order/)).toBeNull();
+});
+
+test("a failed refresh is not shown under a later outcome", async () => {
+  const user = userEvent.setup();
+  const fake = platform({
+    investPreview: out("PREVIEW", accepted(), true),
+    investResult: out("DONE", [leg("BTC", "60", "FILLED")], false),
+  });
+  renderAt("/", [
+    http.post("/api/portfolio/refresh", () =>
+      HttpResponse.json({ detail: "down" }, { status: 503 }),
+    ),
+    ...fake.handlers,
+  ]);
+  await user.click(await openButton());
+  await user.click(
+    await screen.findByRole("button", { name: "Confirm: invest €100.00" }),
+  );
+  await screen.findByText(/The new balances could not be read/);
+  await user.click(screen.getByRole("button", { name: "Close" }));
+
+  fake.state.investResult = out(
+    "ERROR",
+    [leg("BTC", "60", "FAILED", "boom" as never)],
+    false,
+  );
+  await user.click(await openButton());
+  await user.click(
+    await screen.findByRole("button", { name: "Confirm: invest €100.00" }),
+  );
+  expect(
+    await screen.findByText("The operation failed. Nothing more was sent."),
+  ).toBeInTheDocument();
+  expect(screen.queryByText(/The new balances could not be read/)).toBeNull();
+});

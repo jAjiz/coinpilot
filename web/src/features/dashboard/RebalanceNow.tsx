@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router";
 import { api, operationError, unwrap } from "@/api/client";
-import { proposalKey } from "@/api/queries";
+import { portfolioKey, proposalKey } from "@/api/queries";
 import { FormError } from "@/components/FormError";
 import { Button } from "@/components/ui/button";
 import { useOnline } from "@/features/shell/useOnline";
@@ -18,6 +18,8 @@ export function RebalanceNow() {
   const rebalance = useMutation({
     mutationFn: () => unwrap(api.POST("/api/rebalance")),
     onSuccess: async (result) => {
+      // Every evaluation keeps a snapshot: the portfolio has a newer reading.
+      void client.invalidateQueries({ queryKey: portfolioKey });
       if (result.status === "PROPOSED" && result.proposal) {
         client.setQueryData(proposalKey, result.proposal);
         void navigate("/proposal");

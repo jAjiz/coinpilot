@@ -2,7 +2,8 @@ import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { afterEach, expect, test } from "vitest";
-import type { Config, Proposal } from "@/api/queries";
+import { proposalKey, type Config, type Proposal } from "@/api/queries";
+import { createQueryClient } from "@/providers";
 import { fakePlatform, type FakeState } from "@/test/fakePlatform";
 import { renderAt } from "@/test/render";
 
@@ -496,4 +497,86 @@ test("without orders there is nothing to approve", async () => {
   );
   await screen.findByRole("button", { name: "Dismiss" });
   expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+});
+
+test("dismiss is disabled while the confirmation is open", async () => {
+  const user = userEvent.setup();
+  renderAt("/proposal", platform().handlers);
+  await user.click(await approveButton());
+  await screen.findByRole("button", { name: "Confirm" });
+  expect(screen.getByRole("button", { name: "Dismiss" })).toBeDisabled();
+  await user.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(screen.getByRole("button", { name: "Dismiss" })).toBeEnabled();
+});
+
+test("approve cannot be tapped while a dismissal is in flight", async () => {
+  const user = userEvent.setup();
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const fake = platform();
+  renderAt("/proposal", [
+    http.delete("/api/proposal", async () => {
+      await gate;
+      return new HttpResponse(null, { status: 204 });
+    }),
+    ...fake.handlers,
+  ]);
+  await user.click(await screen.findByRole("button", { name: "Dismiss" }));
+  await screen.findByRole("button", { name: "Dismissing…" });
+  const approve = screen.getByRole("button", { name: "Approve" });
+  expect(approve).toBeDisabled();
+  await user.click(approve);
+  expect(screen.queryByRole("button", { name: "Confirm" })).toBeNull();
+  release();
+  await screen.findByRole("heading", { name: "Home" });
+  expect(fake.requests.map((r) => r.path)).not.toContain(
+    "/api/proposal/approve",
+  );
+});
+
+test("a new version read under an open confirmation closes it", async () => {
+  const user = userEvent.setup();
+  const fake = platform();
+  const client = createQueryClient();
+  renderAt("/proposal", fake.handlers, client);
+  await user.click(await approveButton());
+  await screen.findByText("Send 2 orders for €70.50?");
+  fake.state.proposal = proposal({
+    version: 4,
+    legs: [leg("ADA", "buy", "15", null)],
+  });
+  await act(() => client.invalidateQueries({ queryKey: proposalKey }));
+  expect(
+    await screen.findByText("The proposal changed; review it again."),
+  ).toBeInTheDocument();
+  expect(screen.getByText("Buy ADA for €15.00")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Confirm" })).toBeNull();
+  await user.click(await approveButton());
+  expect(screen.getByText("Send 1 order for €15.00?")).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Confirm" }));
+  await screen.findByText("Every order was filled.");
+  expect(fake.requests[0]).toEqual({
+    method: "POST",
+    path: "/api/proposal/approve",
+    body: { version: 4 },
+  });
+});
+
+test("a proposal withdrawn under an open confirmation closes it", async () => {
+  const user = userEvent.setup();
+  const fake = platform();
+  const client = createQueryClient();
+  renderAt("/proposal", fake.handlers, client);
+  await user.click(await approveButton());
+  await screen.findByText("Send 2 orders for €70.50?");
+  fake.state.proposal = null;
+  await act(() => client.invalidateQueries({ queryKey: proposalKey }));
+  expect(
+    await screen.findByText("There is no proposal to review."),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByText("The proposal changed; review it again."),
+  ).toBeInTheDocument();
 });

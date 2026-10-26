@@ -50,6 +50,8 @@ export function InvestNow() {
   function leave() {
     preview.reset();
     confirm.reset();
+    // A failed read of the balances belongs to the outcome being left.
+    refresh.reset();
     setStep({ kind: "idle" });
   }
 
@@ -141,12 +143,17 @@ function PreviewStep({
       </>
     );
   }
-  const accepted = result.legs.filter((leg) => leg.status === "VALIDATED");
-  const total = formatMoney(sum(accepted.map((l) => l.amount_fiat)), fiat);
+  // The confirmed invest sends every leg Kraken accepted and every leg it
+  // could not check; the total is what will be sent.
+  const toSend = result.legs.filter(
+    (leg) => leg.status === "VALIDATED" || leg.status === "UNCHECKED",
+  );
+  const unchecked = toSend.some((leg) => leg.status === "UNCHECKED");
+  const total = formatMoney(sum(toSend.map((l) => l.amount_fiat)), fiat);
   return (
     <>
       <LegList legs={result.legs} fiat={fiat} />
-      {accepted.length === 0 ? (
+      {toSend.length === 0 ? (
         <>
           <p>Kraken would accept none of these orders.</p>
           <Button variant="outline" onClick={onClose}>
@@ -156,6 +163,12 @@ function PreviewStep({
       ) : (
         <>
           <p>Total {total}</p>
+          {unchecked && (
+            <p>
+              Kraken could not check every order; the unchecked ones are sent
+              too.
+            </p>
+          )}
           <p className="text-sm text-muted-foreground">
             Prices move: the orders are computed again when you confirm.
           </p>

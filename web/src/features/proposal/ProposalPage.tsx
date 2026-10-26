@@ -60,13 +60,17 @@ export function ProposalPage() {
   const navigate = useNavigate();
   const online = useOnline();
   const refresh = useRefreshPortfolio();
-  const [confirming, setConfirming] = useState(false);
+  // The version the open confirmation is for; null when it is closed.
+  const [confirming, setConfirming] = useState<number | null>(null);
   // Held here, not read from a query: after an approval the proposal is gone,
   // and after a 409 there may be none, but what happened stays on screen.
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [notice, setNotice] = useState<string[] | null>(null);
   // Set synchronously, so a second tap in the same tick cannot send again.
   const sending = useRef(false);
+  // Once an approval has been sent, a dismissal must not take the page away
+  // from its outcome.
+  const approved = useRef(false);
 
   const dismiss = useMutation({
     mutationFn: async () => {
@@ -79,7 +83,7 @@ export function ProposalPage() {
     },
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: proposalKey });
-      void navigate("/");
+      if (!approved.current) void navigate("/");
     },
   });
 
@@ -88,19 +92,20 @@ export function ProposalPage() {
       unwrap(api.POST("/api/proposal/approve", { body: { version } })),
     onSuccess: (result, { fiat }) => {
       setOutcome({ result, fiat });
-      setConfirming(false);
+      setConfirming(null);
       void client.invalidateQueries({ queryKey: proposalKey });
       if (sentAnything(result.legs)) refresh.mutate();
     },
     onError: (error) => {
+      approved.current = false;
       const changed = superseded(error);
       if (changed !== null) {
         client.setQueryData(proposalKey, changed.proposal);
-        setConfirming(false);
+        setConfirming(null);
         setNotice(changed.messages);
       } else if (isGone(error)) {
         client.setQueryData(proposalKey, null);
-        setConfirming(false);
+        setConfirming(null);
       }
     },
     onSettled: () => {
@@ -108,20 +113,34 @@ export function ProposalPage() {
     },
   });
 
-  function open() {
+  // A refetch that brings another version, or none, closes the confirmation:
+  // what it asked about is no longer what Confirm would approve.
+  const live = proposal.data;
+  if (
+    confirming !== null &&
+    !approve.isPending &&
+    live !== undefined &&
+    (live === null || live.version !== confirming)
+  ) {
+    setConfirming(null);
+    setNotice([]);
+  }
+
+  function open(version: number) {
     setNotice(null);
     approve.reset();
-    setConfirming(true);
+    setConfirming(version);
   }
 
   function cancel() {
     approve.reset();
-    setConfirming(false);
+    setConfirming(null);
   }
 
   function send(version: number, fiat: string) {
-    if (sending.current) return;
+    if (sending.current || dismiss.isPending) return;
     sending.current = true;
+    approved.current = true;
     approve.mutate({ version, fiat });
   }
 
@@ -236,7 +255,7 @@ export function ProposalPage() {
             <p className="font-medium">
               Total {formatMoney(totals.total, data.fiat)}
             </p>
-            {confirming ? (
+            {confirming !== null ? (
               <div className="flex flex-col items-start gap-3">
                 <p>
                   Send {countOrders(orders.length)} for{" "}
@@ -244,8 +263,8 @@ export function ProposalPage() {
                 </p>
                 <div className="flex gap-2">
                   <Button
-                    onClick={() => send(data.version, data.fiat)}
-                    disabled={approve.isPending || !online}
+                    onClick={() => send(confirming, data.fiat)}
+                    disabled={approve.isPending || dismiss.isPending || !online}
                   >
                     {approve.isPending ? "Sending…" : "Confirm"}
                   </Button>
@@ -262,7 +281,7 @@ export function ProposalPage() {
             ) : (
               <Button
                 className="self-start"
-                onClick={open}
+                onClick={() => open(data.version)}
                 disabled={dismiss.isPending || !online}
               >
                 Approve
@@ -292,7 +311,12 @@ export function ProposalPage() {
         <Button
           variant="outline"
           onClick={withdraw}
-          disabled={dismiss.isPending || approve.isPending || !online}
+          disabled={
+            confirming !== null ||
+            dismiss.isPending ||
+            approve.isPending ||
+            !online
+          }
         >
           {dismiss.isPending ? "Dismissing…" : "Dismiss"}
         </Button>

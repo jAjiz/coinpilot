@@ -168,3 +168,39 @@ test("rebalance now is disabled while it runs and while offline", async () => {
     ).toBeDisabled(),
   );
 });
+
+// Every evaluation keeps a snapshot, so the portfolio is read again after it.
+function countingPortfolio(fake: ReturnType<typeof platform>) {
+  const counter = { reads: 0 };
+  const handler = http.get("/api/portfolio", () => {
+    counter.reads += 1;
+    return fake.state.snapshot === null
+      ? HttpResponse.json({ detail: "no snapshot yet" }, { status: 404 })
+      : HttpResponse.json(fake.state.snapshot);
+  });
+  return { counter, handler };
+}
+
+test("nothing to rebalance reads the portfolio again", async () => {
+  const user = userEvent.setup();
+  const fake = platform();
+  const { counter, handler } = countingPortfolio(fake);
+  renderAt("/", [handler, ...fake.handlers]);
+  const button = await openButton();
+  await waitFor(() => expect(counter.reads).toBe(1));
+  await user.click(button);
+  await screen.findByText("Nothing to rebalance.");
+  await waitFor(() => expect(counter.reads).toBe(2));
+});
+
+test("a rebalance found reads the portfolio again", async () => {
+  const user = userEvent.setup();
+  const fake = platform({ rebalanceResult: proposed() });
+  const { counter, handler } = countingPortfolio(fake);
+  renderAt("/", [handler, ...fake.handlers]);
+  const button = await openButton();
+  await waitFor(() => expect(counter.reads).toBe(1));
+  await user.click(button);
+  await screen.findByText("Buy BTC for €50.00");
+  await waitFor(() => expect(counter.reads).toBe(2));
+});
