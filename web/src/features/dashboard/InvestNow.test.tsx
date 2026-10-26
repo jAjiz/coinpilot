@@ -295,3 +295,29 @@ test("invest now is disabled while offline", async () => {
     expect(screen.getByRole("button", { name: "Invest now" })).toBeDisabled(),
   );
 });
+
+test("a failed refresh after filled orders is said", async () => {
+  const user = userEvent.setup();
+  const fake = platform({
+    investPreview: out("PREVIEW", accepted(), true),
+    investResult: out("DONE", [leg("BTC", "60", "FILLED")], false),
+  });
+  renderAt("/", [
+    http.post("/api/portfolio/refresh", () =>
+      HttpResponse.json({ detail: "down" }, { status: 503 }),
+    ),
+    ...fake.handlers,
+  ]);
+  await user.click(await openButton());
+  await user.click(
+    await screen.findByRole("button", { name: "Confirm: invest €100.00" }),
+  );
+  expect(
+    await screen.findByText("Every order was filled."),
+  ).toBeInTheDocument();
+  expect(
+    await screen.findByText(
+      "The new balances could not be read. Kraken didn't answer; nothing was changed.",
+    ),
+  ).toBeInTheDocument();
+});

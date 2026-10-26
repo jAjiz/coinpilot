@@ -106,6 +106,13 @@ export function InvestNow() {
           <Button variant="outline" onClick={leave}>
             Close
           </Button>
+          <FormError
+            message={
+              refresh.isError
+                ? `The new balances could not be read. ${operationError(refresh.error)}`
+                : null
+            }
+          />
         </>
       )}
       <FormError message={error} />
