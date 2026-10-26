@@ -1,5 +1,6 @@
 import { AccountValue } from "./AccountValue";
 import { Allocation } from "./Allocation";
+import { InvestNow } from "./InvestNow";
 import { ProposalCard } from "./ProposalCard";
 
 export function DashboardPage() {
@@ -9,6 +10,7 @@ export function DashboardPage() {
       <ProposalCard />
       <AccountValue />
       <Allocation />
+      <InvestNow />
     </div>
   );
 }

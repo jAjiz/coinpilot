@@ -5,6 +5,7 @@ import { compare, sum } from "@/lib/decimal";
 
 type HoldingOut = components["schemas"]["HoldingOut"];
 type ConfigPatch = components["schemas"]["ConfigPatch"];
+type InvestOut = components["schemas"]["InvestOut"];
 
 export type FakeState = {
   config: Config | null; // null: no settings yet (GET -> 404)
@@ -15,6 +16,8 @@ export type FakeState = {
   keyReply: { status: number; body: unknown }; // POST /api/credentials
   snapshot: Portfolio | null; // GET /api/portfolio; null -> 404
   proposal: Proposal | null; // GET /api/proposal; null -> 404
+  investPreview: InvestOut; // POST /api/invest?preview=true
+  investResult: InvestOut; // POST /api/invest
   nextInvestAt: string;
   nextRebalanceAt: string;
 };
@@ -45,6 +48,18 @@ const DEFAULTS: FakeState = {
   },
   snapshot: null,
   proposal: null,
+  investPreview: {
+    status: "NOTHING_TO_DO",
+    preview: true,
+    legs: [],
+    messages: ["there is no free cash to invest"],
+  },
+  investResult: {
+    status: "NOTHING_TO_DO",
+    preview: false,
+    legs: [],
+    messages: ["there is no free cash to invest"],
+  },
   nextInvestAt: "2026-10-26T11:20:00Z",
   nextRebalanceAt: "2026-11-01T11:20:00Z",
 };
@@ -84,9 +99,10 @@ export function fakePlatform(initial: Partial<FakeState> = {}): {
   async function record(request: Request): Promise<unknown> {
     const text = await request.text();
     const body: unknown = text === "" ? null : JSON.parse(text);
+    const url = new URL(request.url);
     requests.push({
       method: request.method,
-      path: new URL(request.url).pathname,
+      path: url.pathname + url.search,
       body,
     });
     return body;
@@ -220,6 +236,14 @@ export function fakePlatform(initial: Partial<FakeState> = {}): {
       }
       state.proposal = null;
       return new HttpResponse(null, { status: 204 });
+    }),
+
+    http.post("/api/invest", async ({ request }) => {
+      await record(request);
+      const preview = new URL(request.url).searchParams.get("preview");
+      return HttpResponse.json(
+        preview === "true" ? state.investPreview : state.investResult,
+      );
     }),
 
     http.post("/api/portfolio/refresh", async ({ request }) => {
