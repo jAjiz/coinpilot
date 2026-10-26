@@ -15,6 +15,12 @@ const handlers = [
   http.get("/api/config", () =>
     HttpResponse.json({ fiat: "EUR", onboarded_at: "2026-01-01T00:00:00Z" }),
   ),
+  http.get("/api/portfolio", () =>
+    HttpResponse.json({ detail: "no snapshot" }, { status: 404 }),
+  ),
+  http.get("/api/proposal", () =>
+    HttpResponse.json({ detail: "no proposal" }, { status: 404 }),
+  ),
 ];
 const notice =
   "You're offline. Nothing can be sent until the connection is back.";

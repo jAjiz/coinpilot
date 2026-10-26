@@ -23,6 +23,15 @@ const signedOut = [
 const onboarded = http.get("/api/config", () =>
   HttpResponse.json(onboardedConfig),
 );
+// Home reads the account and the proposal; neither exists here.
+const noAccount = [
+  http.get("/api/portfolio", () =>
+    HttpResponse.json({ detail: "no snapshot" }, { status: 404 }),
+  ),
+  http.get("/api/proposal", () =>
+    HttpResponse.json({ detail: "no proposal" }, { status: 404 }),
+  ),
+];
 const noKey = [
   http.get("/api/config", () =>
     HttpResponse.json({ detail: "no settings" }, { status: 404 }),
@@ -54,7 +63,11 @@ test("a deep link cannot skip a step", async () => {
 });
 
 test("an onboarded user cannot re-enter onboarding", async () => {
-  const router = renderAt("/onboarding/key", [signedIn, onboarded]);
+  const router = renderAt("/onboarding/key", [
+    signedIn,
+    onboarded,
+    ...noAccount,
+  ]);
   await screen.findByRole("heading", { name: "Home" });
   expect(router.state.location.pathname).toBe("/");
 });
@@ -97,13 +110,13 @@ test("the sign-in link leaves the application", async () => {
 });
 
 test("a signed-in user opening the login page goes home", async () => {
-  const router = renderAt("/login", [signedIn, onboarded]);
+  const router = renderAt("/login", [signedIn, onboarded, ...noAccount]);
   await screen.findByRole("heading", { name: "Home" });
   expect(router.state.location.pathname).toBe("/");
 });
 
 test("an unknown path goes home", async () => {
-  const router = renderAt("/nowhere", [signedIn, onboarded]);
+  const router = renderAt("/nowhere", [signedIn, onboarded, ...noAccount]);
   await waitFor(() => expect(router.state.location.pathname).toBe("/"));
   await screen.findByRole("heading", { name: "Home" });
 });

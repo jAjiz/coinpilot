@@ -1,6 +1,6 @@
 import { http, HttpResponse, type HttpHandler, type JsonBodyType } from "msw";
 import type { components } from "@/api/schema";
-import type { Config } from "@/api/queries";
+import type { Config, Portfolio, Proposal } from "@/api/queries";
 import { compare, sum } from "@/lib/decimal";
 
 type HoldingOut = components["schemas"]["HoldingOut"];
@@ -13,6 +13,8 @@ export type FakeState = {
   portfolio: { cash: string; holdings: HoldingOut[] }; // what a refresh returns
   untradable: string[]; // PUT -> 422 "kraken has no tradable {X}/{fiat} pair"
   keyReply: { status: number; body: unknown }; // POST /api/credentials
+  snapshot: Portfolio | null; // GET /api/portfolio; null -> 404
+  proposal: Proposal | null; // GET /api/proposal; null -> 404
   nextInvestAt: string;
   nextRebalanceAt: string;
 };
@@ -41,6 +43,8 @@ const DEFAULTS: FakeState = {
       unnecessary: [],
     },
   },
+  snapshot: null,
+  proposal: null,
   nextInvestAt: "2026-10-26T11:20:00Z",
   nextRebalanceAt: "2026-11-01T11:20:00Z",
 };
@@ -196,6 +200,20 @@ export function fakePlatform(initial: Partial<FakeState> = {}): {
       return new HttpResponse(null, { status: 204 });
     }),
 
+    http.get("/api/portfolio", () =>
+      state.snapshot === null
+        ? detail(
+            404,
+            "no snapshot yet; POST /api/portfolio/refresh to take one",
+          )
+        : HttpResponse.json(state.snapshot),
+    ),
+    http.get("/api/proposal", () =>
+      state.proposal === null
+        ? detail(404, "there is no live proposal")
+        : HttpResponse.json(state.proposal),
+    ),
+
     http.post("/api/portfolio/refresh", async ({ request }) => {
       await record(request);
       if (state.config === null) return detail(409, "no settings yet");
@@ -224,7 +242,7 @@ export function fakePlatform(initial: Partial<FakeState> = {}): {
         state.portfolio.cash,
         ...holdings.map((h) => h.value ?? "0"),
       ]);
-      return HttpResponse.json({
+      const snapshot: Portfolio = {
         as_of: "2026-10-20T10:00:00Z",
         fiat: state.config.fiat,
         total_value: total,
@@ -232,7 +250,9 @@ export function fakePlatform(initial: Partial<FakeState> = {}): {
         cash_target_pct: cashTarget(),
         cash_weight_pct: null,
         holdings,
-      });
+      };
+      state.snapshot = snapshot;
+      return HttpResponse.json(snapshot);
     }),
   ];
 

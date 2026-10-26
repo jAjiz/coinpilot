@@ -1,11 +1,12 @@
-import { useMe } from "@/features/auth/session";
+import { AccountValue } from "./AccountValue";
+import { Allocation } from "./Allocation";
 
 export function DashboardPage() {
-  const me = useMe();
   return (
-    <>
+    <div className="flex flex-col gap-6">
       <h1 className="text-xl font-semibold">Home</h1>
-      <p>Signed in as {me.data?.email}.</p>
-    </>
+      <AccountValue />
+      <Allocation />
+    </div>
   );
 }

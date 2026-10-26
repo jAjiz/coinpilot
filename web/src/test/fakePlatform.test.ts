@@ -108,3 +108,27 @@ test("a refresh reports the cash target left by the stored targets", async () =>
   expect(body.cash_target_pct).toBe("30");
   expect(p.requests.at(-1)?.path).toBe("/api/portfolio/refresh");
 });
+
+test("the snapshot and the proposal answer 404 until there is one", async () => {
+  const p = fakePlatform();
+  expect(await call(p, "GET", "/api/portfolio")).toEqual({
+    status: 404,
+    body: {
+      detail: "no snapshot yet; POST /api/portfolio/refresh to take one",
+    },
+  });
+  expect(await call(p, "GET", "/api/proposal")).toEqual({
+    status: 404,
+    body: { detail: "there is no live proposal" },
+  });
+});
+
+test("a refresh becomes the snapshot that GET /api/portfolio returns", async () => {
+  const p = fakePlatform();
+  await call(p, "PATCH", "/api/config", eur);
+  const refreshed = await call(p, "POST", "/api/portfolio/refresh");
+  expect(await call(p, "GET", "/api/portfolio")).toEqual({
+    status: 200,
+    body: refreshed.body,
+  });
+});
