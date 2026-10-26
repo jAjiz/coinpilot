@@ -13,7 +13,7 @@ export function AccountValue() {
   const refresh = useRefreshPortfolio();
   const online = useOnline();
 
-  if (portfolio.isError) {
+  if (portfolio.isError && portfolio.data === undefined) {
     return (
       <section className="flex flex-col items-start gap-3">
         <p role="alert">{describeError(portfolio.error)}</p>

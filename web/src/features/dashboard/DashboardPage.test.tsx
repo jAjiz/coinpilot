@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { afterEach, expect, test } from "vitest";
 import type { Config, Portfolio } from "@/api/queries";
+import { createQueryClient } from "@/providers";
 import { fakePlatform, type FakeState } from "@/test/fakePlatform";
 import { renderAt } from "@/test/render";
 
@@ -264,4 +265,31 @@ test("refresh is disabled while offline", async () => {
   await waitFor(() =>
     expect(screen.getByRole("button", { name: "Refresh" })).toBeDisabled(),
   );
+});
+
+test("a failed background refetch keeps the value on screen", async () => {
+  const client = createQueryClient();
+  const fake = platform();
+  let fail = false;
+  renderAt(
+    "/",
+    [
+      http.get("/api/portfolio", () =>
+        fail
+          ? HttpResponse.json({ detail: "platform down" }, { status: 500 })
+          : HttpResponse.json(snapshot()),
+      ),
+      ...fake.handlers,
+    ],
+    client,
+  );
+  await screen.findByText("€1,050.00");
+  fail = true;
+  await client.invalidateQueries({ queryKey: ["portfolio"] });
+  await waitFor(() =>
+    expect(client.getQueryState(["portfolio"])?.status).toBe("error"),
+  );
+  expect(screen.getByText("€1,050.00")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+  expect(screen.getByRole("heading", { name: "Allocation" })).toBeVisible();
 });
