@@ -213,6 +213,14 @@ export function fakePlatform(initial: Partial<FakeState> = {}): {
         ? detail(404, "there is no live proposal")
         : HttpResponse.json(state.proposal),
     ),
+    http.delete("/api/proposal", async ({ request }) => {
+      await record(request);
+      if (state.proposal === null) {
+        return detail(404, "there is no live proposal");
+      }
+      state.proposal = null;
+      return new HttpResponse(null, { status: 204 });
+    }),
 
     http.post("/api/portfolio/refresh", async ({ request }) => {
       await record(request);

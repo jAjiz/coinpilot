@@ -8,6 +8,7 @@ import {
 import { DashboardPage } from "@/features/dashboard/DashboardPage";
 import { HistoryPage } from "@/features/history/HistoryPage";
 import { OnboardingPage } from "@/features/onboarding/OnboardingPage";
+import { ProposalPage } from "@/features/proposal/ProposalPage";
 import { SettingsPage } from "@/features/settings/SettingsPage";
 import { AppShell } from "@/features/shell/AppShell";
 
@@ -30,6 +31,7 @@ export const routes: RouteObject[] = [
             element: <AppShell />,
             children: [
               { path: "/", element: <DashboardPage /> },
+              { path: "/proposal", element: <ProposalPage /> },
               { path: "/history", element: <HistoryPage /> },
               { path: "/settings", element: <SettingsPage /> },
             ],
