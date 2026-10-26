@@ -7,6 +7,7 @@ type HoldingOut = components["schemas"]["HoldingOut"];
 type ConfigPatch = components["schemas"]["ConfigPatch"];
 type InvestOut = components["schemas"]["InvestOut"];
 type RebalanceOut = components["schemas"]["RebalanceOut"];
+type LegOut = components["schemas"]["LegOut"];
 
 export type FakeState = {
   config: Config | null; // null: no settings yet (GET -> 404)
@@ -20,6 +21,8 @@ export type FakeState = {
   investPreview: InvestOut; // POST /api/invest?preview=true
   investResult: InvestOut; // POST /api/invest
   rebalanceResult: RebalanceOut; // POST /api/rebalance; its proposal becomes live
+  // POST /api/proposal/approve; unset: DONE, every order of the live proposal FILLED
+  approveResult?: RebalanceOut;
   nextInvestAt: string;
   nextRebalanceAt: string;
 };
@@ -88,6 +91,30 @@ const DEFAULT_CONFIG = {
   rebalance_interval_months: null,
   rebalance_cadence_anchor: null,
 } as const;
+
+// Every order of the proposal (a leg without a note), filled as asked.
+function filled(proposal: Proposal): RebalanceOut {
+  const legs = proposal.legs
+    .filter((leg) => leg.note === null)
+    .map((leg): LegOut => ({
+      asset: leg.asset,
+      pair: leg.pair,
+      side: leg.side,
+      amount_fiat: leg.amount_fiat,
+      minimum_fiat: leg.minimum_fiat,
+      status: "FILLED",
+      cl_ord_id: null,
+      txid: null,
+      cost: null,
+      executed_volume: null,
+      executed_price: null,
+      fee: null,
+      error: null,
+      note: null,
+      volume: null,
+    }));
+  return { status: "DONE", legs, proposal: null, messages: [] };
+}
 
 function detail(status: number, message: string) {
   return HttpResponse.json({ detail: message }, { status });
@@ -244,6 +271,25 @@ export function fakePlatform(initial: Partial<FakeState> = {}): {
       }
       state.proposal = null;
       return new HttpResponse(null, { status: 204 });
+    }),
+
+    http.post("/api/proposal/approve", async ({ request }) => {
+      const body = (await record(request)) as { version: number };
+      if (state.proposal === null) {
+        return detail(404, "there is no live proposal");
+      }
+      if (body.version !== state.proposal.version) {
+        return HttpResponse.json(
+          {
+            detail: "that is not the live version; read the proposal again",
+            proposal: state.proposal,
+          },
+          { status: 409 },
+        );
+      }
+      const result = state.approveResult ?? filled(state.proposal);
+      state.proposal = null;
+      return HttpResponse.json(result);
     }),
 
     http.post("/api/invest", async ({ request }) => {

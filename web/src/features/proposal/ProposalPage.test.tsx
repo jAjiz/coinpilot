@@ -212,3 +212,288 @@ test("dismiss is disabled while offline", async () => {
     expect(screen.getByRole("button", { name: "Dismiss" })).toBeDisabled(),
   );
 });
+
+function sent(
+  asset: string,
+  side: string,
+  amount: string,
+  status: string,
+  error: string | null = null,
+) {
+  return {
+    ...leg(asset, side, amount, null),
+    status,
+    cl_ord_id: null,
+    txid: null,
+    cost: null,
+    executed_volume: null,
+    executed_price: null,
+    fee: null,
+    error,
+    volume: null,
+  };
+}
+
+const approveButton = () => screen.findByRole("button", { name: "Approve" });
+
+test("approving asks first, then sends the version on screen", async () => {
+  const user = userEvent.setup();
+  const fake = platform();
+  renderAt("/proposal", fake.handlers);
+  await user.click(await approveButton());
+  expect(
+    await screen.findByText("Send 2 orders for €70.50?"),
+  ).toBeInTheDocument();
+  expect(fake.requests).toEqual([]);
+  await user.click(screen.getByRole("button", { name: "Confirm" }));
+  await screen.findByText("Every order was filled.");
+  expect(fake.requests[0]).toEqual({
+    method: "POST",
+    path: "/api/proposal/approve",
+    body: { version: 3 },
+  });
+});
+
+test("an approval shows what was sent and refreshes the account", async () => {
+  const user = userEvent.setup();
+  const fake = platform();
+  const router = renderAt("/proposal", fake.handlers);
+  await user.click(await approveButton());
+  await user.click(await screen.findByRole("button", { name: "Confirm" }));
+  expect(
+    await screen.findByText("Every order was filled."),
+  ).toBeInTheDocument();
+  expect(screen.getByText("Buy BTC for €50.00")).toBeInTheDocument();
+  expect(screen.getByText("Sell ETH for €20.50")).toBeInTheDocument();
+  expect(screen.getAllByText("Filled")).toHaveLength(2);
+  await waitFor(() =>
+    expect(fake.requests.map((r) => `${r.method} ${r.path}`)).toEqual([
+      "POST /api/proposal/approve",
+      "POST /api/portfolio/refresh",
+    ]),
+  );
+  // The outcome stays although the proposal query now reads nothing.
+  expect(screen.getByText("Every order was filled.")).toBeInTheDocument();
+  await user.click(screen.getByRole("link", { name: "Back to Home" }));
+  expect(
+    await screen.findByRole("heading", { name: "Home" }),
+  ).toBeInTheDocument();
+  expect(router.state.location.pathname).toBe("/");
+  await screen.findByRole("button", { name: "Invest now" });
+  expect(
+    screen.queryByRole("heading", { name: "Rebalance proposal" }),
+  ).toBeNull();
+});
+
+test("a double tap on confirm sends once", async () => {
+  const user = userEvent.setup();
+  const fake = platform();
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let approvals = 0;
+  renderAt("/proposal", [
+    http.post("/api/proposal/approve", async () => {
+      approvals += 1;
+      await gate;
+      return HttpResponse.json({
+        status: "DONE",
+        legs: [sent("BTC", "buy", "50", "FILLED")],
+        proposal: null,
+        messages: [],
+      });
+    }),
+    ...fake.handlers,
+  ]);
+  await user.click(await approveButton());
+  const confirm = await screen.findByRole("button", { name: "Confirm" });
+  await user.click(confirm);
+  await user.click(confirm);
+  expect(
+    await screen.findByRole("button", { name: "Sending…" }),
+  ).toBeDisabled();
+  release();
+  expect(
+    await screen.findByText("Every order was filled."),
+  ).toBeInTheDocument();
+  expect(approvals).toBe(1);
+});
+
+test("a new version is shown for a new review", async () => {
+  const user = userEvent.setup();
+  const fake = platform();
+  renderAt("/proposal", fake.handlers);
+  await user.click(await approveButton());
+  await screen.findByText("Send 2 orders for €70.50?");
+  fake.state.proposal = proposal({
+    version: 4,
+    legs: [leg("ADA", "buy", "15", null)],
+  });
+  await user.click(screen.getByRole("button", { name: "Confirm" }));
+  expect(
+    await screen.findByText("The proposal changed; review it again."),
+  ).toBeInTheDocument();
+  expect(screen.getByText("Buy ADA for €15.00")).toBeInTheDocument();
+  expect(screen.queryByText("Buy BTC for €50.00")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Confirm" })).toBeNull();
+  await user.click(await approveButton());
+  expect(
+    screen.queryByText("The proposal changed; review it again."),
+  ).toBeNull();
+  expect(screen.getByText("Send 1 order for €15.00?")).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Confirm" }));
+  await screen.findByText("Every order was filled.");
+  expect(fake.requests.map((r) => [r.path, r.body])).toEqual([
+    ["/api/proposal/approve", { version: 3 }],
+    ["/api/proposal/approve", { version: 4 }],
+    ["/api/portfolio/refresh", null],
+  ]);
+});
+
+test("a proposal withdrawn under the user ends on the empty page with the notice", async () => {
+  const user = userEvent.setup();
+  const fake = platform();
+  renderAt("/proposal", [
+    http.post("/api/proposal/approve", () =>
+      HttpResponse.json(
+        {
+          detail: "the plan changed",
+          proposal: null,
+          messages: ["the drift is below the threshold"],
+        },
+        { status: 409 },
+      ),
+    ),
+    ...fake.handlers,
+  ]);
+  await user.click(await approveButton());
+  await user.click(await screen.findByRole("button", { name: "Confirm" }));
+  expect(
+    await screen.findByText("There is no proposal to review."),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByText("The proposal changed; review it again."),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByText("the drift is below the threshold"),
+  ).toBeInTheDocument();
+});
+
+test("a proposal already gone ends on the empty page", async () => {
+  const user = userEvent.setup();
+  const fake = platform();
+  renderAt("/proposal", fake.handlers);
+  await user.click(await approveButton());
+  await screen.findByRole("button", { name: "Confirm" });
+  fake.state.proposal = null;
+  await user.click(screen.getByRole("button", { name: "Confirm" }));
+  expect(
+    await screen.findByText("There is no proposal to review."),
+  ).toBeInTheDocument();
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
+test("a partial approval says so", async () => {
+  const user = userEvent.setup();
+  const fake = platform({
+    approveResult: {
+      status: "PARTIAL",
+      legs: [
+        sent("BTC", "buy", "50", "FILLED"),
+        sent("ETH", "sell", "20.5", "FAILED", "EOrder:Insufficient funds"),
+      ],
+      proposal: null,
+      messages: [],
+    },
+  });
+  renderAt("/proposal", fake.handlers);
+  await user.click(await approveButton());
+  await user.click(await screen.findByRole("button", { name: "Confirm" }));
+  expect(
+    await screen.findByText(
+      "Kraken refused some orders; the others were filled.",
+    ),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByText("Failed: EOrder:Insufficient funds"),
+  ).toBeInTheDocument();
+});
+
+test("another approval failure is shown and the confirmation stays", async () => {
+  const user = userEvent.setup();
+  const fake = platform();
+  renderAt("/proposal", [
+    http.post("/api/proposal/approve", () =>
+      HttpResponse.json(
+        { detail: "kraken could not be read; nothing was sent" },
+        { status: 503 },
+      ),
+    ),
+    ...fake.handlers,
+  ]);
+  await user.click(await approveButton());
+  await user.click(await screen.findByRole("button", { name: "Confirm" }));
+  expect(
+    await screen.findByText("Kraken didn't answer; nothing was changed."),
+  ).toBeInTheDocument();
+  expect(screen.getByText("Send 2 orders for €70.50?")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Confirm" })).toBeEnabled();
+});
+
+test("a failed refresh after an approval is said", async () => {
+  const user = userEvent.setup();
+  const fake = platform();
+  renderAt("/proposal", [
+    http.post("/api/portfolio/refresh", () =>
+      HttpResponse.json({ detail: "down" }, { status: 503 }),
+    ),
+    ...fake.handlers,
+  ]);
+  await user.click(await approveButton());
+  await user.click(await screen.findByRole("button", { name: "Confirm" }));
+  expect(
+    await screen.findByText("Every order was filled."),
+  ).toBeInTheDocument();
+  expect(
+    await screen.findByText(
+      "The new balances could not be read. Kraken didn't answer; nothing was changed.",
+    ),
+  ).toBeInTheDocument();
+});
+
+test("cancel sends nothing", async () => {
+  const user = userEvent.setup();
+  const fake = platform();
+  renderAt("/proposal", fake.handlers);
+  await user.click(await approveButton());
+  await user.click(await screen.findByRole("button", { name: "Cancel" }));
+  expect(await approveButton()).toBeInTheDocument();
+  expect(screen.queryByText("Send 2 orders for €70.50?")).toBeNull();
+  expect(fake.requests).toEqual([]);
+});
+
+test("approve is disabled while offline", async () => {
+  const user = userEvent.setup();
+  renderAt("/proposal", platform().handlers);
+  await user.click(await approveButton());
+  setOnline(false);
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Confirm" })).toBeDisabled(),
+  );
+  await user.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+});
+
+test("without orders there is nothing to approve", async () => {
+  renderAt(
+    "/proposal",
+    platform({
+      proposal: proposal({
+        legs: [leg("SOL", "buy", "3", "below kraken's minimum")],
+      }),
+    }).handlers,
+  );
+  await screen.findByRole("button", { name: "Dismiss" });
+  expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+});

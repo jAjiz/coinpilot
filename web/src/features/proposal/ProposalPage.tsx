@@ -1,3 +1,4 @@
+import { useRef, useState, type ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router";
 import {
@@ -7,21 +8,70 @@ import {
   operationError,
   unwrap,
 } from "@/api/client";
-import { proposalKey, useProposal } from "@/api/queries";
+import {
+  proposalKey,
+  useProposal,
+  useRefreshPortfolio,
+  type Proposal,
+} from "@/api/queries";
+import type { components } from "@/api/schema";
 import { FormError } from "@/components/FormError";
+import { LegList } from "@/components/LegList";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useOnline } from "@/features/shell/useOnline";
 import { proposalTotals } from "@/lib/account";
 import { formatMoney } from "@/lib/decimal";
-import { legLine } from "@/lib/operations";
+import {
+  countOrders,
+  legLine,
+  outcomeSentence,
+  sentAnything,
+} from "@/lib/operations";
 import { formatRun } from "@/lib/summary";
+
+type RebalanceOut = components["schemas"]["RebalanceOut"];
+type Outcome = { result: RebalanceOut; fiat: string };
+
+// A 409 whose body carries the live proposal (null when there is none): the
+// version approved was not the live one, or the plan changed under it.
+function superseded(
+  error: unknown,
+): { proposal: Proposal | null; messages: string[] } | null {
+  if (!(error instanceof ApiError) || error.status !== 409) return null;
+  const body = error.body;
+  if (typeof body !== "object" || body === null || !("proposal" in body)) {
+    return null;
+  }
+  const { proposal, messages } = body as {
+    proposal: Proposal | null;
+    messages?: unknown;
+  };
+  return {
+    proposal,
+    messages: Array.isArray(messages)
+      ? messages.filter((m): m is string => typeof m === "string")
+      : [],
+  };
+}
+
+function isGone(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 404;
+}
 
 export function ProposalPage() {
   const proposal = useProposal();
   const client = useQueryClient();
   const navigate = useNavigate();
   const online = useOnline();
+  const refresh = useRefreshPortfolio();
+  const [confirming, setConfirming] = useState(false);
+  // Held here, not read from a query: after an approval the proposal is gone,
+  // and after a 409 there may be none, but what happened stays on screen.
+  const [outcome, setOutcome] = useState<Outcome | null>(null);
+  const [notice, setNotice] = useState<string[] | null>(null);
+  // Set synchronously, so a second tap in the same tick cannot send again.
+  const sending = useRef(false);
 
   const dismiss = useMutation({
     mutationFn: async () => {
@@ -38,7 +88,89 @@ export function ProposalPage() {
     },
   });
 
-  const heading = <h1 className="text-xl font-semibold">Proposal</h1>;
+  const approve = useMutation({
+    mutationFn: ({ version }: { version: number; fiat: string }) =>
+      unwrap(api.POST("/api/proposal/approve", { body: { version } })),
+    onSuccess: (result, { fiat }) => {
+      setOutcome({ result, fiat });
+      setConfirming(false);
+      void client.invalidateQueries({ queryKey: proposalKey });
+      if (sentAnything(result.legs)) refresh.mutate();
+    },
+    onError: (error) => {
+      const changed = superseded(error);
+      if (changed !== null) {
+        client.setQueryData(proposalKey, changed.proposal);
+        setConfirming(false);
+        setNotice(changed.messages);
+      } else if (isGone(error)) {
+        client.setQueryData(proposalKey, null);
+        setConfirming(false);
+      }
+    },
+    onSettled: () => {
+      sending.current = false;
+    },
+  });
+
+  function open() {
+    setNotice(null);
+    approve.reset();
+    setConfirming(true);
+  }
+
+  function cancel() {
+    approve.reset();
+    setConfirming(false);
+  }
+
+  function send(version: number, fiat: string) {
+    if (sending.current) return;
+    sending.current = true;
+    approve.mutate({ version, fiat });
+  }
+
+  function withdraw() {
+    setNotice(null);
+    dismiss.mutate();
+  }
+
+  const heading: ReactNode = (
+    <>
+      <h1 className="text-xl font-semibold">Proposal</h1>
+      {notice !== null && (
+        <div className="flex flex-col gap-1 self-stretch rounded-md border p-3">
+          <p className="font-medium">The proposal changed; review it again.</p>
+          {notice.map((m) => (
+            <p key={m}>{m}</p>
+          ))}
+        </div>
+      )}
+    </>
+  );
+
+  if (outcome !== null) {
+    return (
+      <div className="flex flex-col items-start gap-3">
+        {heading}
+        <p>{outcomeSentence(outcome.result.status)}</p>
+        <LegList legs={outcome.result.legs} fiat={outcome.fiat} />
+        {outcome.result.messages.map((m) => (
+          <p key={m}>{m}</p>
+        ))}
+        <FormError
+          message={
+            refresh.isError
+              ? `The new balances could not be read. ${operationError(refresh.error)}`
+              : null
+          }
+        />
+        <Link to="/" className="font-medium underline">
+          Back to Home
+        </Link>
+      </div>
+    );
+  }
 
   if (proposal.isError && proposal.data === undefined) {
     return (
@@ -82,6 +214,13 @@ export function ProposalPage() {
   const skipped = data.legs.filter((leg) => leg.note !== null);
   const trigger =
     data.trigger === "SCHEDULED" ? "by your schedule" : "on request";
+  // A 409 with a proposal and a 404 are answered by the page itself.
+  const approveError =
+    approve.isError &&
+    superseded(approve.error) === null &&
+    !isGone(approve.error)
+      ? operationError(approve.error)
+      : null;
 
   return (
     <div className="flex flex-col gap-6">
@@ -108,6 +247,38 @@ export function ProposalPage() {
             <p className="font-medium">
               Total {formatMoney(totals.total, data.fiat)}
             </p>
+            {confirming ? (
+              <div className="flex flex-col items-start gap-3">
+                <p>
+                  Send {countOrders(orders.length)} for{" "}
+                  {formatMoney(totals.total, data.fiat)}?
+                </p>
+                <div className="flex gap-2">
+                  <Button
+                    onClick={() => send(data.version, data.fiat)}
+                    disabled={approve.isPending || !online}
+                  >
+                    {approve.isPending ? "Sending…" : "Confirm"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={cancel}
+                    disabled={approve.isPending}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+                <FormError message={approveError} />
+              </div>
+            ) : (
+              <Button
+                className="self-start"
+                onClick={open}
+                disabled={dismiss.isPending || !online}
+              >
+                Approve
+              </Button>
+            )}
           </>
         )}
       </section>
@@ -131,8 +302,8 @@ export function ProposalPage() {
         />
         <Button
           variant="outline"
-          onClick={() => dismiss.mutate()}
-          disabled={dismiss.isPending || !online}
+          onClick={withdraw}
+          disabled={dismiss.isPending || approve.isPending || !online}
         >
           {dismiss.isPending ? "Dismissing…" : "Dismiss"}
         </Button>
