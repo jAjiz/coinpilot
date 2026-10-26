@@ -5,10 +5,11 @@ import { useConfig, useRefreshPortfolio } from "@/api/queries";
 import type { components } from "@/api/schema";
 import { FormError } from "@/components/FormError";
 import { LegList } from "@/components/LegList";
+import { OperationOutcome } from "@/components/OperationOutcome";
 import { Button } from "@/components/ui/button";
 import { useOnline } from "@/features/shell/useOnline";
 import { formatMoney, sum } from "@/lib/decimal";
-import { outcomeSentence, sentAnything } from "@/lib/operations";
+import { sentAnything } from "@/lib/operations";
 
 type InvestOut = components["schemas"]["InvestOut"];
 type Step =
@@ -97,23 +98,15 @@ export function InvestNow() {
         />
       )}
       {step.kind === "outcome" && (
-        <>
-          <p>{outcomeSentence(step.result.status)}</p>
-          <LegList legs={step.result.legs} fiat={fiat} />
-          {step.result.messages.map((m) => (
-            <p key={m}>{m}</p>
-          ))}
+        <OperationOutcome
+          result={step.result}
+          fiat={fiat}
+          refreshError={refresh.error}
+        >
           <Button variant="outline" onClick={leave}>
             Close
           </Button>
-          <FormError
-            message={
-              refresh.isError
-                ? `The new balances could not be read. ${operationError(refresh.error)}`
-                : null
-            }
-          />
-        </>
+        </OperationOutcome>
       )}
       <FormError message={error} />
     </section>

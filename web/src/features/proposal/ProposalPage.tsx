@@ -16,18 +16,13 @@ import {
 } from "@/api/queries";
 import type { components } from "@/api/schema";
 import { FormError } from "@/components/FormError";
-import { LegList } from "@/components/LegList";
+import { OperationOutcome } from "@/components/OperationOutcome";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useOnline } from "@/features/shell/useOnline";
 import { proposalTotals } from "@/lib/account";
 import { formatMoney } from "@/lib/decimal";
-import {
-  countOrders,
-  legLine,
-  outcomeSentence,
-  sentAnything,
-} from "@/lib/operations";
+import { countOrders, legLine, sentAnything } from "@/lib/operations";
 import { formatRun } from "@/lib/summary";
 
 type RebalanceOut = components["schemas"]["RebalanceOut"];
@@ -153,21 +148,15 @@ export function ProposalPage() {
     return (
       <div className="flex flex-col items-start gap-3">
         {heading}
-        <p>{outcomeSentence(outcome.result.status)}</p>
-        <LegList legs={outcome.result.legs} fiat={outcome.fiat} />
-        {outcome.result.messages.map((m) => (
-          <p key={m}>{m}</p>
-        ))}
-        <FormError
-          message={
-            refresh.isError
-              ? `The new balances could not be read. ${operationError(refresh.error)}`
-              : null
-          }
-        />
-        <Link to="/" className="font-medium underline">
-          Back to Home
-        </Link>
+        <OperationOutcome
+          result={outcome.result}
+          fiat={outcome.fiat}
+          refreshError={refresh.error}
+        >
+          <Link to="/" className="font-medium underline">
+            Back to Home
+          </Link>
+        </OperationOutcome>
       </div>
     );
   }
