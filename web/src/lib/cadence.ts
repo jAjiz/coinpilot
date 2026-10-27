@@ -17,7 +17,8 @@ export type CadenceFields = {
   cadence_anchor: string | null;
 };
 export type CadenceForm<C> =
-  { kind: "choice"; choice: C; date: string } | { kind: "custom" };
+  | { kind: "choice"; choice: C; date: string }
+  | { kind: "custom"; fields: CadenceFields };
 
 type Length = { days: number; months: number };
 
@@ -103,7 +104,9 @@ function readInterval<C extends string>(
   table: Record<C, Length>,
 ): CadenceForm<C> {
   const date = noonDate(fields.cadence_anchor);
-  if (fields.mode !== "INTERVAL" || date === null) return { kind: "custom" };
+  if (fields.mode !== "INTERVAL" || date === null) {
+    return { kind: "custom", fields };
+  }
   const days = fields.interval_days ?? 0;
   const months = fields.interval_months ?? 0;
   for (const choice of Object.keys(table) as C[]) {
@@ -111,7 +114,68 @@ function readInterval<C extends string>(
       return { kind: "choice", choice, date };
     }
   }
-  return { kind: "custom" };
+  return { kind: "custom", fields };
+}
+
+// The anchor as a datetime-local input shows it: local time, to the minute.
+export function anchorInput(iso: string | null): string {
+  if (iso === null) return "";
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return "";
+  return `${localDate(at)}T${pad(at.getHours())}:${pad(at.getMinutes())}`;
+}
+
+// The UTC instant of a local date-time; null when it is not a usable one.
+export function anchorFromInput(text: string): string | null {
+  const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})$/.exec(text);
+  if (match === null || !isUsableDate(match[1])) return null;
+  const [y, m, d] = match[1].split("-").map(Number);
+  const hour = Number(match[2]);
+  const minute = Number(match[3]);
+  if (hour > 23 || minute > 59) return null;
+  return new Date(y, m - 1, d, hour, minute).toISOString();
+}
+
+export type CustomErrors = {
+  days: string | null;
+  months: string | null;
+  anchor: string | null;
+};
+
+const whole = (n: number | null, max: number) =>
+  n === null || (Number.isInteger(n) && n >= 0 && n <= max);
+
+// The bounds ConfigPatch enforces: 0-3650 days, 0-120 months. A mode of MIN
+// uses neither, so nothing is checked.
+export function checkCustom(fields: CadenceFields): CustomErrors {
+  const none = { days: null, months: null, anchor: null };
+  if (fields.mode === "MIN") return none;
+  const days = whole(fields.interval_days, 3650)
+    ? null
+    : "Enter whole days from 0 to 3650.";
+  const months = whole(fields.interval_months, 120)
+    ? null
+    : "Enter whole months from 0 to 120.";
+  return {
+    days:
+      days ??
+      (months === null &&
+      !(fields.interval_days ?? 0) &&
+      !(fields.interval_months ?? 0)
+        ? "Choose at least one day or one month."
+        : null),
+    months,
+    anchor: fields.cadence_anchor === null ? "Choose when it starts." : null,
+  };
+}
+
+export function sameFields(a: CadenceFields, b: CadenceFields): boolean {
+  return (
+    a.mode === b.mode &&
+    a.interval_days === b.interval_days &&
+    a.interval_months === b.interval_months &&
+    a.cadence_anchor === b.cadence_anchor
+  );
 }
 
 export function readInvest(

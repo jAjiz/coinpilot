@@ -215,10 +215,10 @@ test("a custom cadence is kept unless changed", async () => {
   await open(fake);
   expect(screen.getByLabelText("Invest cadence")).toHaveValue("custom");
   expect(
-    screen.getByText(
-      "Set through the API; kept unless you choose another option.",
+    screen.getAllByText(
+      "Set through the API. Edit its fields, or choose another option.",
     ),
-  ).toBeInTheDocument();
+  ).toHaveLength(1);
   await user.click(save());
   await waitFor(() => expect(fake.requests).toHaveLength(1));
   const body = fake.requests[0].body as Record<string, unknown>;

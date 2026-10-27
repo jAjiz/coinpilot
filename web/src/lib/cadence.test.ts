@@ -1,6 +1,9 @@
 import { expect, test } from "vitest";
 import {
+  anchorFromInput,
+  anchorInput,
   cadencePatch,
+  checkCustom,
   localDate,
   readInvest,
   readRebalance,
@@ -85,7 +88,6 @@ test("every choice reads back as itself", () => {
 });
 
 test("a cadence the select cannot express is custom", () => {
-  const custom = { kind: "custom" };
   const noon = investFields("daily", "2026-03-29").cadence_anchor;
   expect(
     readRebalance({
@@ -94,7 +96,7 @@ test("a cadence the select cannot express is custom", () => {
       interval_months: null,
       cadence_anchor: null,
     }),
-  ).toEqual(custom);
+  ).toMatchObject({ kind: "custom" });
   expect(
     readInvest(
       {
@@ -105,7 +107,7 @@ test("a cadence the select cannot express is custom", () => {
       },
       "2026-03-29",
     ),
-  ).toEqual(custom);
+  ).toMatchObject({ kind: "custom" });
   expect(
     readInvest(
       {
@@ -116,7 +118,7 @@ test("a cadence the select cannot express is custom", () => {
       },
       "2026-03-29",
     ),
-  ).toEqual(custom);
+  ).toMatchObject({ kind: "custom" });
   expect(
     readInvest(
       {
@@ -127,7 +129,7 @@ test("a cadence the select cannot express is custom", () => {
       },
       "2026-03-29",
     ),
-  ).toEqual(custom);
+  ).toMatchObject({ kind: "custom" });
   expect(
     readInvest(
       {
@@ -138,7 +140,7 @@ test("a cadence the select cannot express is custom", () => {
       },
       "2026-03-29",
     ),
-  ).toEqual(custom);
+  ).toMatchObject({ kind: "custom" });
 });
 
 test("today is the local date", () => {
@@ -155,4 +157,64 @@ test("the patch names the prefix's fields", () => {
     rebalance_interval_months: 3,
     rebalance_interval_days: null,
   });
+});
+
+test("the anchor round-trips through the local input", () => {
+  expect(anchorInput("2026-10-27T11:00:00.000Z")).toBe("2026-10-27T12:00");
+  expect(anchorFromInput("2026-10-27T12:00")).toBe("2026-10-27T11:00:00.000Z");
+  expect(anchorInput(null)).toBe("");
+  expect(anchorFromInput("")).toBeNull();
+  expect(anchorFromInput("2026-02-31T12:00")).toBeNull();
+});
+
+test("the anchor input crosses daylight saving", () => {
+  expect(anchorInput("2026-07-01T10:00:00.000Z")).toBe("2026-07-01T12:00");
+  expect(anchorFromInput("2026-07-01T12:00")).toBe("2026-07-01T10:00:00.000Z");
+});
+
+test("custom checks name the field at fault", () => {
+  const ok = {
+    mode: "INTERVAL" as const,
+    interval_days: 10,
+    interval_months: null,
+    cadence_anchor: "2026-10-27T11:00:00.000Z",
+  };
+  expect(checkCustom(ok)).toEqual({ days: null, months: null, anchor: null });
+  expect(checkCustom({ ...ok, interval_days: 3651 }).days).toBe(
+    "Enter whole days from 0 to 3650.",
+  );
+  expect(checkCustom({ ...ok, interval_days: 1.5 }).days).toBe(
+    "Enter whole days from 0 to 3650.",
+  );
+  expect(checkCustom({ ...ok, interval_days: NaN }).days).toBe(
+    "Enter whole days from 0 to 3650.",
+  );
+  expect(checkCustom({ ...ok, interval_months: 121 }).months).toBe(
+    "Enter whole months from 0 to 120.",
+  );
+  expect(
+    checkCustom({ ...ok, interval_days: 0, interval_months: 0 }).days,
+  ).toBe("Choose at least one day or one month.");
+  expect(checkCustom({ ...ok, cadence_anchor: null }).anchor).toBe(
+    "Choose when it starts.",
+  );
+  expect(
+    checkCustom({
+      ...ok,
+      mode: "MIN",
+      interval_days: -1,
+      cadence_anchor: null,
+    }),
+  ).toEqual({ days: null, months: null, anchor: null });
+});
+
+test("a cadence read that the select cannot express keeps its fields", () => {
+  const fields = {
+    mode: "INTERVAL" as const,
+    interval_days: 10,
+    interval_months: null,
+    cadence_anchor: "2026-10-27T11:00:00.000Z",
+  };
+  expect(readInvest(fields, "2026-10-27")).toEqual({ kind: "custom", fields });
+  expect(readRebalance(fields)).toEqual({ kind: "custom", fields });
 });

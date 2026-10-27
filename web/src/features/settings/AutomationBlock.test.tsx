@@ -117,3 +117,84 @@ test("a failed refetch keeps the open form and its edits", async () => {
   expect(screen.getByLabelText("Invest cadence")).toHaveValue("daily");
   expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
 });
+
+const CUSTOM: Config = {
+  ...CONFIG,
+  invest_interval_days: 10,
+  invest_cadence_anchor: "2026-10-26T11:00:00Z",
+  // Noon in Madrid, so only the invest cadence is custom.
+  rebalance_cadence_anchor: "2026-10-01T10:00:00Z",
+};
+
+async function openCustom(fake: ReturnType<typeof platform>) {
+  const user = userEvent.setup();
+  renderAt("/settings", fake.handlers);
+  await user.click(
+    await screen.findByRole("button", { name: "Edit automation" }),
+  );
+  expect(screen.getByLabelText("Invest cadence")).toHaveValue("custom");
+  return user;
+}
+
+function customPlatform() {
+  return fakePlatform({
+    registered: true,
+    config: CUSTOM,
+    nextInvestAt: "2026-11-02T11:00:00Z",
+    nextRebalanceAt: "2027-01-01T11:00:00Z",
+  });
+}
+
+test("a custom cadence's fields are edited and sent", async () => {
+  const fake = customPlatform();
+  const user = await openCustom(fake);
+  expect(screen.getByLabelText("Days")).toHaveValue("10");
+  expect(screen.getByLabelText("Starts")).toHaveValue("2026-10-26T12:00");
+  const days = screen.getByLabelText("Days");
+  await user.clear(days);
+  await user.type(days, "14");
+  await user.click(screen.getByRole("button", { name: "Save and continue" }));
+  await waitFor(() => expect(fake.requests).toHaveLength(1));
+  expect(fake.requests[0].body).toMatchObject({
+    invest_cadence_mode: "INTERVAL",
+    invest_interval_days: 14,
+    invest_interval_months: null,
+    invest_cadence_anchor: "2026-10-26T11:00:00Z",
+  });
+});
+
+test("an untouched custom cadence is not sent", async () => {
+  const fake = customPlatform();
+  const user = await openCustom(fake);
+  await user.click(screen.getByRole("button", { name: "Save and continue" }));
+  await waitFor(() => expect(fake.requests).toHaveLength(1));
+  expect(Object.keys(fake.requests[0].body as object)).not.toContain(
+    "invest_interval_days",
+  );
+});
+
+test("an interval of nothing is refused before sending", async () => {
+  const fake = customPlatform();
+  const user = await openCustom(fake);
+  const days = screen.getByLabelText("Days");
+  await user.clear(days);
+  await user.type(days, "0");
+  await user.click(screen.getByRole("button", { name: "Save and continue" }));
+  expect(
+    await screen.findByText("Choose at least one day or one month."),
+  ).toBeInTheDocument();
+  expect(fake.requests).toEqual([]);
+});
+
+test("a day count that is not whole is refused next to its field", async () => {
+  const fake = customPlatform();
+  const user = await openCustom(fake);
+  const days = screen.getByLabelText("Days");
+  await user.clear(days);
+  await user.type(days, "1.5");
+  await user.click(screen.getByRole("button", { name: "Save and continue" }));
+  expect(
+    await screen.findByText("Enter whole days from 0 to 3650."),
+  ).toBeInTheDocument();
+  expect(fake.requests).toEqual([]);
+});

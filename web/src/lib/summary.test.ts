@@ -7,6 +7,13 @@ import {
   type SummaryInput,
 } from "./summary";
 
+const MIN = {
+  mode: "MIN",
+  interval_days: null,
+  interval_months: null,
+  cadence_anchor: null,
+} as const;
+
 const base: SummaryInput = {
   fiat: "EUR",
   invest: { kind: "choice", choice: "weekly", date: "2026-10-19" },
@@ -103,8 +110,8 @@ test("a minimum order adds a sentence", () => {
 test("custom cadences", () => {
   const out = summarize({
     ...base,
-    invest: { kind: "custom" },
-    rebalance: { kind: "custom" },
+    invest: { kind: "custom", fields: MIN },
+    rebalance: { kind: "custom", fields: MIN },
   });
   expect(out[0]).toBe(
     "On a custom schedule, free EUR is invested toward your targets.",
@@ -144,6 +151,8 @@ test("a start date that has passed begins later", () => {
       "2026-10-26T10:20:00Z",
     ),
   ).toBe(false);
-  expect(startsLater({ kind: "custom" }, "2026-10-26T10:20:00Z")).toBe(false);
+  expect(
+    startsLater({ kind: "custom", fields: MIN }, "2026-10-26T10:20:00Z"),
+  ).toBe(false);
   expect(startsLater(weekly, null)).toBe(false);
 });

@@ -25,7 +25,7 @@ const CONFIG: Config = {
 
 test("settings values keep a stored MIN rebalance as custom", () => {
   const values = settingsValues(CONFIG, "2026-10-27");
-  expect(values.rebalance).toEqual({ kind: "custom" });
+  expect(values.rebalance).toMatchObject({ kind: "custom" });
   expect(values.invest).toEqual({
     kind: "choice",
     choice: "asap",
