@@ -9,6 +9,23 @@ const me = { id: "u1", email: "a@b.c", provider: "google", status: "active" };
 const onboardedConfig = {
   fiat: "EUR",
   onboarded_at: "2026-01-01T00:00:00Z",
+  // Settings tells the automation, so the stored fields must be there.
+  invest_cash_enabled: false,
+  cash_rebalance_enabled: false,
+  auto_rebalance_enabled: false,
+  paused: false,
+  min_drift_pct: "0",
+  min_order_fiat: "0",
+  invest_cadence_mode: "MIN",
+  invest_interval_days: null,
+  invest_interval_months: null,
+  invest_cadence_anchor: null,
+  rebalance_cadence_mode: "MIN",
+  rebalance_interval_days: null,
+  rebalance_interval_months: null,
+  rebalance_cadence_anchor: null,
+  next_invest_at: null,
+  next_rebalance_at: null,
 };
 
 const signedIn = http.get("/api/auth/me", () => HttpResponse.json(me));
@@ -134,6 +151,9 @@ test("a failed background refetch keeps the page", async () => {
           : HttpResponse.json({ detail: "platform down" }, { status: 503 });
       }),
       onboarded,
+      http.get("/api/assets", () =>
+        HttpResponse.json({ assets: [], cash_target_pct: "100" }),
+      ),
       http.get("/api/credentials/status", () =>
         HttpResponse.json({ registered: false }),
       ),

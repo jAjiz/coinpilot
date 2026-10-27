@@ -135,6 +135,27 @@ function filled(proposal: Proposal): RebalanceOut {
   return { status: "DONE", legs, proposal: null, messages: [] };
 }
 
+// The first run after the fixed clock: the anchor, stepped by the interval
+// until it is in the future. A MIN cadence keeps the time it had.
+function nextRun(
+  config: Config,
+  prefix: "invest" | "rebalance",
+  current: string,
+): string {
+  const anchor = config[`${prefix}_cadence_anchor`];
+  if (config[`${prefix}_cadence_mode`] !== "INTERVAL" || anchor === null) {
+    return current;
+  }
+  const days = config[`${prefix}_interval_days`] ?? 0;
+  const months = config[`${prefix}_interval_months`] ?? 0;
+  const at = new Date(anchor);
+  while (at.getTime() <= Date.now()) {
+    at.setUTCDate(at.getUTCDate() + days);
+    at.setUTCMonth(at.getUTCMonth() + months);
+  }
+  return at.toISOString();
+}
+
 function detail(status: number, message: string) {
   return HttpResponse.json({ detail: message }, { status });
 }
@@ -168,7 +189,9 @@ export function fakePlatform(initial: Partial<FakeState> = {}): {
   }
 
   function withSchedule(config: Config): Config {
+    // A test may seed a partial configuration; the platform always sends all.
     return {
+      ...DEFAULT_CONFIG,
       ...config,
       next_invest_at: config.invest_cash_enabled ? state.nextInvestAt : null,
       next_rebalance_at: state.nextRebalanceAt,
@@ -216,6 +239,21 @@ export function fakePlatform(initial: Partial<FakeState> = {}): {
         Object.entries(fields).filter(([, value]) => value !== undefined),
       );
       state.config = { ...base, ...sent } as Config;
+      // A changed cadence is rescheduled, as the platform does.
+      if (Object.keys(sent).some((k) => k.startsWith("invest_cadence"))) {
+        state.nextInvestAt = nextRun(
+          state.config,
+          "invest",
+          state.nextInvestAt,
+        );
+      }
+      if (Object.keys(sent).some((k) => k.startsWith("rebalance_cadence"))) {
+        state.nextRebalanceAt = nextRun(
+          state.config,
+          "rebalance",
+          state.nextRebalanceAt,
+        );
+      }
       if (onboarded) state.config.onboarded_at = "2026-10-20T10:00:00Z";
       return HttpResponse.json(withSchedule(state.config));
     }),
