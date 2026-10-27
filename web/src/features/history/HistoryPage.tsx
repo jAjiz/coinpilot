@@ -15,6 +15,8 @@ export function HistoryPage() {
     body = (
       <LoadFailed error={sessions.error} onRetry={() => sessions.refetch()} />
     );
+  } else if (config.isError) {
+    body = <LoadFailed error={config.error} onRetry={() => config.refetch()} />;
   } else if (sessions.isPending) {
     body = (
       <div className="flex flex-col gap-2">
@@ -25,7 +27,7 @@ export function HistoryPage() {
     );
   } else {
     const rows = sessions.data.pages.flat();
-    const fiat = config.data?.fiat ?? "";
+    const fiat = config.data?.fiat;
     body =
       rows.length === 0 ? (
         <p>

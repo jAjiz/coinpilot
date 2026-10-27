@@ -158,3 +158,22 @@ test("a failed read offers a retry", async () => {
   await user.click(screen.getByRole("button", { name: "Try again" }));
   expect(await screen.findByText("Invest · scheduled")).toBeInTheDocument();
 });
+
+test("a failed orders read offers a retry", async () => {
+  const user = userEvent.setup();
+  const fake = platform({ sessions: [session(5)], orders: [ORDER] });
+  let fail = true;
+  renderAt("/history", [
+    http.get("/api/orders", () =>
+      fail
+        ? HttpResponse.json({ detail: "orders down" }, { status: 500 })
+        : undefined,
+    ),
+    ...fake.handlers,
+  ]);
+  await user.click(await screen.findByRole("button", { name: /Invest/ }));
+  expect(await screen.findByText("orders down")).toBeInTheDocument();
+  fail = false;
+  await user.click(screen.getByRole("button", { name: "Try again" }));
+  expect(await screen.findByText("Buy BTC for €50.00")).toBeInTheDocument();
+});

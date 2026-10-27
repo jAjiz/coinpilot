@@ -2,6 +2,7 @@ import { useState } from "react";
 import { describeError } from "@/api/client";
 import { useSessionOrders } from "@/api/queries";
 import type { components } from "@/api/schema";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatMoney } from "@/lib/decimal";
 import {
@@ -15,10 +16,20 @@ import { formatRun } from "@/lib/summary";
 
 type Session = components["schemas"]["EvaluationOut"];
 
-function Orders({ id, fiat }: { id: string; fiat: string }) {
+function Orders({ id, fiat }: { id: string; fiat: string | undefined }) {
   const orders = useSessionOrders(id, true);
-  if (orders.isPending) return <Skeleton className="h-10 w-full" />;
-  if (orders.isError) return <p role="alert">{describeError(orders.error)}</p>;
+  // Amounts need the fiat; wait for it rather than format without one.
+  if (orders.isPending || fiat === undefined) {
+    return <Skeleton className="h-10 w-full" />;
+  }
+  if (orders.isError) {
+    return (
+      <div role="alert" className="flex flex-col items-start gap-2">
+        <p>{describeError(orders.error)}</p>
+        <Button onClick={() => orders.refetch()}>Try again</Button>
+      </div>
+    );
+  }
   if (orders.data.length === 0) {
     return <p>No orders are linked to this run.</p>;
   }
@@ -44,7 +55,7 @@ export function SessionRow({
   fiat,
 }: {
   session: Session;
-  fiat: string;
+  fiat: string | undefined;
 }) {
   const [open, setOpen] = useState(false);
   const messages = messagesOf(session.log_messages);
