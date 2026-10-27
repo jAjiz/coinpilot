@@ -31,5 +31,5 @@ is five phases, in the order of its §9; cycle 2, notifications, gets its own sp
 | **9. The platform, ready for the application** | The `/api` prefix, the callback that redirects, `onboarded_at`, typed holdings, the application served from the same origin | Sign in at `/api/auth/login/google` and land on `/`. `/api/docs` lists every route under `/api`. | Done (#39) |
 | **10. The application's skeleton** | `web/` with Vite, the generated client, session and guards; the multi-stage image; the CI job | Deploy, open the address on your phone, sign in, see the empty shell. Install it as an app. | Done (#41) |
 | **11. Onboarding** | The four-step wizard | Run it against your real account: the key, your holdings prefilled, a cadence, the summary. | Done (#43) |
-| **12. Dashboard and proposal** | Value, allocation, invest now, rebalance now, approve | Request a rebalance and approve it from the phone. | In review |
+| **12. Dashboard and proposal** | Value, allocation, invest now, rebalance now, approve | Request a rebalance and approve it from the phone. | Done (#55) |
 | **13. History and settings** | The execution history; every setting editable; pause; sign out | Change a cadence in settings and see the next run move. | Pending |
