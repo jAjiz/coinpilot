@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, describeError, unwrap } from "@/api/client";
 import { configKey, useConfig } from "@/api/queries";
+import { sessionGuard } from "@/api/signOut";
 import { FormError } from "@/components/FormError";
 import { Switch } from "@/components/ui/switch";
 import { useOnline } from "@/features/shell/useOnline";
@@ -12,7 +13,10 @@ export function PauseBlock() {
   const save = useMutation({
     mutationFn: (paused: boolean) =>
       unwrap(api.PATCH("/api/config", { body: { paused } })),
-    onSuccess: (data) => client.setQueryData(configKey, data),
+    onMutate: () => sessionGuard(client),
+    onSuccess: (data, _, stillSame) => {
+      if (stillSame()) client.setQueryData(configKey, data);
+    },
   });
 
   if (!config.data) return null;
@@ -32,7 +36,8 @@ export function PauseBlock() {
       </div>
       <p>
         While paused, nothing runs on schedule. Invest now and Rebalance now
-        still work. On resume, a run whose time passed runs once.
+        still work. On resume, the next runs are scheduled from then: nothing
+        missed while paused runs.
       </p>
       <FormError message={save.isError ? describeError(save.error) : null} />
     </section>

@@ -135,21 +135,42 @@ function filled(proposal: Proposal): RebalanceOut {
   return { status: "DONE", legs, proposal: null, messages: [] };
 }
 
-// The first run after the fixed clock: the anchor, stepped by the interval
-// until it is in the future. A MIN cadence keeps the time it had.
+// The settings each next run is computed from, as core/schedule.py lists them.
+// `paused` too: lifting a pause waits for the next slot instead of running
+// what was missed.
+const SOURCES = {
+  invest: [
+    "paused",
+    "invest_cash_enabled",
+    "invest_cadence_mode",
+    "invest_interval_days",
+    "invest_interval_months",
+    "invest_cadence_anchor",
+  ],
+  rebalance: [
+    "paused",
+    "rebalance_cadence_mode",
+    "rebalance_interval_days",
+    "rebalance_interval_months",
+    "rebalance_cadence_anchor",
+  ],
+} as const;
+
+// The first run after now. An interval steps from its anchor; a MIN cadence
+// keeps the time of day it had, a day at a time. A run still ahead stays.
 function nextRun(
   config: Config,
   prefix: "invest" | "rebalance",
   current: string,
 ): string {
   const anchor = config[`${prefix}_cadence_anchor`];
-  if (config[`${prefix}_cadence_mode`] !== "INTERVAL" || anchor === null) {
-    return current;
-  }
-  const days = config[`${prefix}_interval_days`] ?? 0;
-  const months = config[`${prefix}_interval_months`] ?? 0;
+  const interval =
+    config[`${prefix}_cadence_mode`] === "INTERVAL" && anchor !== null;
+  const days = interval ? (config[`${prefix}_interval_days`] ?? 0) : 1;
+  const months = interval ? (config[`${prefix}_interval_months`] ?? 0) : 0;
   if (days === 0 && months === 0) return current;
-  const at = new Date(anchor);
+  if (!interval && new Date(current).getTime() > Date.now()) return current;
+  const at = new Date(interval ? anchor : current);
   while (at.getTime() <= Date.now()) {
     at.setUTCDate(at.getUTCDate() + days);
     at.setUTCMonth(at.getUTCMonth() + months);
@@ -240,15 +261,20 @@ export function fakePlatform(initial: Partial<FakeState> = {}): {
         Object.entries(fields).filter(([, value]) => value !== undefined),
       );
       state.config = { ...base, ...sent } as Config;
-      // A changed cadence is rescheduled, as the platform does.
-      if (Object.keys(sent).some((k) => k.startsWith("invest_cadence"))) {
+      // A change to what a next run is computed from reschedules it, as the
+      // platform does.
+      const touches = (prefix: "invest" | "rebalance") =>
+        Object.keys(sent).some((k) =>
+          (SOURCES[prefix] as readonly string[]).includes(k),
+        );
+      if (touches("invest")) {
         state.nextInvestAt = nextRun(
           state.config,
           "invest",
           state.nextInvestAt,
         );
       }
-      if (Object.keys(sent).some((k) => k.startsWith("rebalance_cadence"))) {
+      if (touches("rebalance")) {
         state.nextRebalanceAt = nextRun(
           state.config,
           "rebalance",
@@ -339,7 +365,23 @@ export function fakePlatform(initial: Partial<FakeState> = {}): {
     ),
     http.delete("/api/proposal", async ({ request }) => {
       await record(request);
-      const version = Number(new URL(request.url).searchParams.get("version"));
+      const query = new URL(request.url).searchParams.get("version");
+      // The platform requires the version: FastAPI's validation error.
+      if (query === null) {
+        return HttpResponse.json(
+          {
+            detail: [
+              {
+                type: "missing",
+                loc: ["query", "version"],
+                msg: "Field required",
+              },
+            ],
+          },
+          { status: 422 },
+        );
+      }
+      const version = Number(query);
       if (state.proposal === null) {
         return detail(404, "there is no live proposal");
       }
@@ -383,14 +425,18 @@ export function fakePlatform(initial: Partial<FakeState> = {}): {
       }
       return HttpResponse.json(listed.slice(from, from + limit));
     }),
-    // A session's orders, oldest first.
+    // A session's orders, oldest first; without a session, newest first.
     http.get("/api/orders", ({ request }) => {
       const query = new URL(request.url).searchParams;
       const limit = Number(query.get("limit") ?? 50);
       const session = query.get("session");
       const listed = state.orders
         .filter((o) => session === null || o.session_id === session)
-        .sort((a, b) => a.created_at.localeCompare(b.created_at));
+        .sort((a, b) =>
+          session === null
+            ? b.created_at.localeCompare(a.created_at)
+            : a.created_at.localeCompare(b.created_at),
+        );
       return HttpResponse.json(listed.slice(0, limit));
     }),
 

@@ -107,7 +107,9 @@ test("pause is saved and shown on Home", async () => {
     { method: "PATCH", path: "/api/config", body: { paused: true } },
   ]);
   expect(
-    screen.getByText(/While paused, nothing runs on schedule/),
+    screen.getByText(
+      "While paused, nothing runs on schedule. Invest now and Rebalance now still work. On resume, the next runs are scheduled from then: nothing missed while paused runs.",
+    ),
   ).toBeInTheDocument();
   await user.click(screen.getByRole("link", { name: "Home" }));
   await screen.findByText(/Automation is paused\./);
@@ -309,6 +311,52 @@ test("a request still in flight at sign out leaves nothing of the first user", a
   release();
   await new Promise((resolve) => setTimeout(resolve, 100));
   expect(router.state.location.pathname).toBe("/login");
+  expect(
+    client
+      .getQueryCache()
+      .getAll()
+      .map((q) => q.queryKey),
+  ).toEqual([["me"]]);
+});
+
+test("a pause or a refresh still in flight at sign out leaves nothing of the first user", async () => {
+  const user = userEvent.setup();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const fake = platform();
+  const client = createQueryClient();
+  renderAt(
+    "/",
+    [
+      http.post("/api/portfolio/refresh", async () => {
+        await gate;
+      }),
+      http.patch("/api/config", async () => {
+        await gate;
+      }),
+      ...fake.handlers,
+    ],
+    client,
+  );
+  await user.click(await screen.findByRole("button", { name: "Refresh" }));
+  await user.click(screen.getByRole("link", { name: "Settings" }));
+  await user.click(
+    await screen.findByRole("switch", { name: "Pause everything" }),
+  );
+  await user.click(screen.getByRole("button", { name: "Sign out" }));
+  await screen.findByRole("link", { name: "Sign in with Google" });
+  release();
+  await waitFor(() =>
+    expect(fake.requests.map((r) => `${r.method} ${r.path}`)).toEqual(
+      expect.arrayContaining([
+        "POST /api/portfolio/refresh",
+        "PATCH /api/config",
+      ]),
+    ),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 100));
   expect(
     client
       .getQueryCache()

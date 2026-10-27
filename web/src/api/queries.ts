@@ -9,7 +9,7 @@ import {
 } from "@tanstack/react-query";
 import { ApiError, api, unwrap } from "@/api/client";
 import type { components } from "@/api/schema";
-import { endSession } from "@/api/signOut";
+import { endSession, sessionGuard } from "@/api/signOut";
 import { onboardingKey } from "@/features/auth/session";
 
 export const configKey = ["config"] as const;
@@ -94,7 +94,10 @@ export function useRefreshPortfolio() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: () => unwrap(api.POST("/api/portfolio/refresh")),
-    onSuccess: (data) => client.setQueryData(portfolioKey, data),
+    onMutate: () => sessionGuard(client),
+    onSuccess: (data, _, stillSame) => {
+      if (stillSame()) client.setQueryData(portfolioKey, data);
+    },
   });
 }
 
