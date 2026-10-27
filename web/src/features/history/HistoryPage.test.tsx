@@ -177,3 +177,43 @@ test("a failed orders read offers a retry", async () => {
   await user.click(screen.getByRole("button", { name: "Try again" }));
   expect(await screen.findByText("Buy BTC for €50.00")).toBeInTheDocument();
 });
+
+// The guard reads /api/config once under its own key; the page's useConfig
+// makes the second request, which is the one these tests hold back.
+test("a failed config read offers a retry", async () => {
+  const user = userEvent.setup();
+  const fake = platform({ sessions: [session(5)] });
+  let calls = 0;
+  let fail = true;
+  renderAt("/history", [
+    http.get("/api/config", () =>
+      ++calls > 1 && fail
+        ? HttpResponse.json({ detail: "config down" }, { status: 500 })
+        : undefined,
+    ),
+    ...fake.handlers,
+  ]);
+  expect(await screen.findByText("config down")).toBeInTheDocument();
+  fail = false;
+  await user.click(screen.getByRole("button", { name: "Try again" }));
+  expect(await screen.findByText("Invest · scheduled")).toBeInTheDocument();
+});
+
+test("a slow config shows the orders skeleton, not a crash", async () => {
+  const user = userEvent.setup();
+  const fake = platform({ sessions: [session(5)], orders: [ORDER] });
+  let calls = 0;
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  renderAt("/history", [
+    http.get("/api/config", async () => {
+      if (++calls > 1) await gate;
+    }),
+    ...fake.handlers,
+  ]);
+  await user.click(await screen.findByRole("button", { name: /Invest/ }));
+  expect(screen.getByRole("heading", { name: "History" })).toBeInTheDocument();
+  expect(screen.queryByText("Buy BTC for €50.00")).toBeNull();
+  release();
+  expect(await screen.findByText("Buy BTC for €50.00")).toBeInTheDocument();
+});
