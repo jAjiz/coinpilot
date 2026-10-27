@@ -159,6 +159,9 @@ test("history shows a run and its orders", async ({ page }) => {
 
   await page.goto("/history");
   await expect(page.getByRole("heading", { name: "History" })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /Invest · scheduled/ }),
+  ).toBeVisible();
   await expect(page.getByText("Nothing to do")).toHaveCount(0);
   await page.getByRole("button", { name: /Invest · scheduled/ }).click();
   await expect(page.getByText("Filled", { exact: true })).toBeVisible();
