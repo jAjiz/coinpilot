@@ -710,6 +710,23 @@
               "default": 50,
               "title": "Limit"
             }
+          },
+          {
+            "name": "session",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Session"
+            }
           }
         ],
         "responses": {
@@ -1326,6 +1343,11 @@
       },
       "EvaluationOut": {
         "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
           "started_at": {
             "type": "string",
             "format": "date-time",
@@ -1394,6 +1416,7 @@
         },
         "type": "object",
         "required": [
+          "id",
           "started_at",
           "finished_at",
           "duration_ms",
@@ -1768,6 +1791,18 @@
             "type": "string",
             "title": "Cl Ord Id"
           },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
           "txid": {
             "anyOf": [
               {
@@ -1867,6 +1902,7 @@
         "type": "object",
         "required": [
           "cl_ord_id",
+          "session_id",
           "txid",
           "pair",
           "asset",

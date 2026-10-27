@@ -1,4 +1,5 @@
 import base64
+import uuid
 from decimal import Decimal
 
 KEY = "TEST-API-KEY-FOR-ALICE"
@@ -116,3 +117,25 @@ def test_the_history_says_what_each_evaluation_was(api, make_user, login, fake_k
 
     [entry] = api.get("/api/sessions", headers=headers).json()
     assert (entry["operation"], entry["trigger"]) == ("INVEST", "API")
+
+
+def test_orders_of_a_session_are_oldest_first(api, make_user, login, fake_kraken):
+    headers = login(make_user())
+    _ready(api, headers, fake_kraken)
+    sent = [leg["cl_ord_id"] for leg in api.post("/api/invest", headers=headers).json()["legs"]]
+    [entry] = api.get("/api/sessions", headers=headers).json()
+
+    orders = api.get("/api/orders", params={"session": entry["id"]}, headers=headers).json()
+
+    assert [order["cl_ord_id"] for order in orders] == sent
+    assert {order["session_id"] for order in orders} == {entry["id"]}
+
+
+def test_sessions_carry_their_id(api, make_user, login, fake_kraken):
+    headers = login(make_user())
+    _ready(api, headers, fake_kraken)
+    api.post("/api/invest", headers=headers)
+
+    [entry] = api.get("/api/sessions", headers=headers).json()
+
+    assert uuid.UUID(entry["id"])

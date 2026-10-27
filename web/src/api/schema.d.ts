@@ -483,6 +483,11 @@ export interface components {
         /** EvaluationOut */
         EvaluationOut: {
             /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
              * Started At
              * Format: date-time
              */
@@ -611,6 +616,8 @@ export interface components {
         OrderOut: {
             /** Cl Ord Id */
             cl_ord_id: string;
+            /** Session Id */
+            session_id: string | null;
             /** Txid */
             txid: string | null;
             /** Pair */
@@ -1305,6 +1312,7 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
+                session?: string | null;
             };
             header?: never;
             path?: never;

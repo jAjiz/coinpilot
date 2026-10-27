@@ -197,6 +197,7 @@ class OrderOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     cl_ord_id: str
+    session_id: uuid.UUID | None
     txid: str | None
     pair: str
     asset: str
@@ -215,6 +216,7 @@ class OrderOut(BaseModel):
 class EvaluationOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
+    id: uuid.UUID
     started_at: datetime
     finished_at: datetime | None
     duration_ms: int | None

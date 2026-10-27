@@ -113,3 +113,16 @@ def test_the_onboarded_at_column_exists(db_session: Session):
     }
 
     assert columns["onboarded_at"]["nullable"] is True
+
+
+def test_migration_adds_order_session_id(db_session: Session):
+    inspector = inspect(db_session.get_bind())
+    columns = {column["name"]: column for column in inspector.get_columns("orders")}
+    keys = [fk for fk in inspector.get_foreign_keys("orders") if fk["constrained_columns"] == ["session_id"]]
+    indexes = {index["name"] for index in inspector.get_indexes("orders")}
+
+    assert columns["session_id"]["nullable"] is True
+    assert [(fk["referred_table"], fk["options"].get("ondelete")) for fk in keys] == [
+        ("sessions", "SET NULL")
+    ]
+    assert "ix_orders_session_id" in indexes

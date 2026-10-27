@@ -5,12 +5,14 @@ second user exists.
 """
 
 import base64
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
 
 from core.db.orders import record_attempt
 from core.db.settings import list_assets
+from core.db.telemetry import start_evaluation
 from core.db.types import OrderReason
 from engine.types import Side
 
@@ -102,3 +104,21 @@ def test_a_proposal_is_not_shared(api, login, bob, alice_ready, fake_kraken):
     assert api.post("/api/proposal/approve", json={"version": 1}, headers=login(bob)).status_code == 404
     assert api.delete("/api/proposal", headers=login(bob)).status_code == 404
     assert api.get("/api/proposal", headers=alice_ready).json()["version"] == 1
+
+
+def test_another_users_session_lists_no_orders(api, db_session, login, alice, bob):
+    evaluation = start_evaluation(db_session, alice.id, started_at=datetime(2026, 10, 27, tzinfo=UTC))
+    record_attempt(
+        db_session,
+        alice.id,
+        cl_ord_id="c" * 32,
+        pair="XXBTZEUR",
+        asset="XBT",
+        side=Side.BUY,
+        reason=OrderReason.INVEST,
+        requested_fiat=Decimal("10"),
+        session_id=evaluation.id,
+    )
+
+    assert api.get("/api/orders", params={"session": str(evaluation.id)}, headers=login(alice)).json() != []
+    assert api.get("/api/orders", params={"session": str(evaluation.id)}, headers=login(bob)).json() == []

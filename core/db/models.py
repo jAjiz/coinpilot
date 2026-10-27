@@ -187,6 +187,11 @@ class Order(TimestampMixin, Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
+    # The evaluation that placed it. Nullable: orders predate the column, and retention
+    # deletes old sessions while the ledger keeps its orders.
+    session_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("sessions.id", ondelete="SET NULL"), nullable=True
+    )
     # Unique across the whole table, not per user. Kraken requires uniqueness among open
     # orders, and a global rule is both stronger and simpler to reason about.
     cl_ord_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
@@ -216,6 +221,7 @@ class Order(TimestampMixin, Base):
         enum_check("reason", OrderReason, "ck_orders_reason"),
         enum_check("status", OrderStatus, "ck_orders_status"),
         Index("ix_orders_user_created_at", "user_id", "created_at"),
+        Index("ix_orders_session_id", "session_id"),
         # Every evaluation begins by asking whether this user has an unresolved attempt.
         # A partial index holds only the rows that answer yes, which is almost none.
         Index("ix_orders_user_pending", "user_id", postgresql_where=text("status = 'PENDING'")),

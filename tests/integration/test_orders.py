@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -15,10 +15,12 @@ from core.db.orders import (
     pending_orders,
     record_attempt,
 )
+from core.db.telemetry import delete_evaluations_before, start_evaluation
 from core.db.types import OrderReason, OrderStatus
 from engine.types import Side
 
 D = Decimal
+NOW = datetime(2026, 9, 17, 12, 0, tzinfo=UTC)
 
 
 def _attempt(session: Session, user_id, cl_ord_id: str, **overrides):
@@ -209,3 +211,29 @@ def test_an_error_longer_than_its_column_is_cut_not_refused(db_session: Session,
 
 def test_an_unknown_client_id_cannot_be_marked_sent(db_session: Session):
     assert mark_sent(db_session, "never-minted", "OTX") is None
+
+
+def test_deleting_a_session_keeps_its_orders(db_session: Session, make_user):
+    user = make_user()
+    evaluation = start_evaluation(db_session, user.id, started_at=NOW - timedelta(days=400))
+    order = _attempt(db_session, user.id, "cl-kept", session_id=evaluation.id)
+    assert order.session_id == evaluation.id
+
+    delete_evaluations_before(db_session, cutoff=NOW - timedelta(days=365))
+    db_session.refresh(order)
+
+    assert order.session_id is None
+    assert [row.cl_ord_id for row in list_orders(db_session, user.id)] == ["cl-kept"]
+
+
+def test_the_orders_of_a_session_are_its_own_and_oldest_first(db_session: Session, make_user):
+    user = make_user()
+    first = start_evaluation(db_session, user.id, started_at=NOW)
+    second = start_evaluation(db_session, user.id, started_at=NOW)
+    for cl_ord_id, session_id in (("cl-b", first.id), ("cl-a", first.id), ("cl-c", second.id)):
+        _attempt(db_session, user.id, cl_ord_id, session_id=session_id)
+
+    listed = list_orders(db_session, user.id, session_id=first.id)
+
+    assert [row.cl_ord_id for row in listed] == ["cl-a", "cl-b"]
+    assert list_orders(db_session, make_user().id, session_id=first.id) == []
