@@ -15,7 +15,12 @@ export function PortfolioBlock() {
   const [editing, setEditing] = useState(false);
 
   if (config.data === null) return null;
-  if (config.isError || assets.isError) {
+  // Once the data exists it stays, whatever a later refetch does: an open
+  // form holds the user's edits.
+  if (config.data === undefined || assets.data === undefined) {
+    if (!config.isError && !assets.isError) {
+      return <Skeleton className="h-24 w-full" />;
+    }
     return (
       <section className="flex flex-col items-start gap-3">
         <h2 className="text-lg font-semibold">Portfolio</h2>
@@ -30,9 +35,6 @@ export function PortfolioBlock() {
         </Button>
       </section>
     );
-  }
-  if (config.data === undefined || assets.data === undefined) {
-    return <Skeleton className="h-24 w-full" />;
   }
   const { fiat } = config.data;
 

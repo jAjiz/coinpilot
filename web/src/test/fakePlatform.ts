@@ -148,6 +148,7 @@ function nextRun(
   }
   const days = config[`${prefix}_interval_days`] ?? 0;
   const months = config[`${prefix}_interval_months`] ?? 0;
+  if (days === 0 && months === 0) return current;
   const at = new Date(anchor);
   while (at.getTime() <= Date.now()) {
     at.setUTCDate(at.getUTCDate() + days);

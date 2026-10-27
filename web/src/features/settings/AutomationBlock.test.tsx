@@ -1,9 +1,12 @@
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Config } from "@/api/queries";
 import { fakePlatform } from "@/test/fakePlatform";
+import { createQueryClient } from "@/providers";
 import { renderAt } from "@/test/render";
+import { server } from "@/test/server";
 
 const CONFIG: Config = {
   fiat: "EUR",
@@ -92,4 +95,25 @@ test("cancel sends nothing", async () => {
   await user.click(screen.getByRole("button", { name: "Cancel" }));
   expect(screen.queryByLabelText("Invest cadence")).not.toBeInTheDocument();
   expect(fake.requests).toEqual([]);
+});
+
+test("a failed refetch keeps the open form and its edits", async () => {
+  const user = userEvent.setup();
+  const client = createQueryClient();
+  renderAt("/settings", platform().handlers, client);
+  await user.click(
+    await screen.findByRole("button", { name: "Edit automation" }),
+  );
+  await user.selectOptions(screen.getByLabelText("Invest cadence"), "daily");
+  server.use(
+    http.get("/api/config", () =>
+      HttpResponse.json({ detail: "platform down" }, { status: 503 }),
+    ),
+  );
+  await client.invalidateQueries({ queryKey: ["config"] });
+  await waitFor(() =>
+    expect(client.getQueryState(["config"])?.status).toBe("error"),
+  );
+  expect(screen.getByLabelText("Invest cadence")).toHaveValue("daily");
+  expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
 });

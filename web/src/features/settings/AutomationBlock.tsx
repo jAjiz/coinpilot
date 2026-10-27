@@ -17,7 +17,8 @@ export function AutomationBlock() {
   const [today] = useState(() => localDate(new Date()));
 
   if (config.data === null) return null;
-  if (config.isError) {
+  // Once the data exists it stays, whatever a later refetch does.
+  if (config.data === undefined && config.isError) {
     return (
       <section className="flex flex-col items-start gap-3">
         <h2 className="text-lg font-semibold">Automation</h2>

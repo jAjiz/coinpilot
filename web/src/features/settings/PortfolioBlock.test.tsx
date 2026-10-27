@@ -1,8 +1,11 @@
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { http, HttpResponse } from "msw";
 import { expect, test } from "vitest";
 import type { Config } from "@/api/queries";
 import { fakePlatform } from "@/test/fakePlatform";
+import { server } from "@/test/server";
+import { createQueryClient } from "@/providers";
 import { renderAt } from "@/test/render";
 
 function platform(
@@ -80,5 +83,29 @@ test("cancel sends nothing", async () => {
   await screen.findByLabelText("Target for BTC");
   await user.click(screen.getByRole("button", { name: "Cancel" }));
   expect(screen.getByText("BTC 30 %")).toBeInTheDocument();
-  expect(fake.requests.filter((r) => r.method !== "POST")).toEqual([]);
+  expect(
+    fake.requests.filter((r) => r.path !== "/api/portfolio/refresh"),
+  ).toEqual([]);
+});
+
+test("a failed refetch keeps the open form and its edits", async () => {
+  const user = userEvent.setup();
+  const fake = platform();
+  const { client } = { client: createQueryClient() };
+  renderAt("/settings", fake.handlers, client);
+  await user.click(await screen.findByRole("button", { name: "Edit targets" }));
+  const input = await screen.findByLabelText("Target for BTC");
+  await user.clear(input);
+  await user.type(input, "35");
+  server.use(
+    http.get("/api/assets", () =>
+      HttpResponse.json({ detail: "platform down" }, { status: 503 }),
+    ),
+  );
+  await client.invalidateQueries({ queryKey: ["assets"] });
+  await waitFor(() =>
+    expect(client.getQueryState(["assets"])?.status).toBe("error"),
+  );
+  expect(screen.getByLabelText("Target for BTC")).toHaveValue("35");
+  expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
 });
