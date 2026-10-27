@@ -24,10 +24,14 @@ export function KeyBlock() {
   const remove = useMutation({
     mutationFn: () => unwrap(api.DELETE("/api/credentials")),
     // A 404 says there was no key: the status read below shows that too.
-    onSettled: () =>
-      client.invalidateQueries({ queryKey: credentialStatusKey }),
-    onSuccess: () => {
+    // Whatever the answer, the confirmation is spent: the next delete, of a
+    // key saved later, takes its own second tap.
+    onSettled: () => {
       setConfirming(false);
+      return client.invalidateQueries({ queryKey: credentialStatusKey });
+    },
+    onSuccess: () => {
+      setReplacing(false);
       setAccepted(null);
     },
   });

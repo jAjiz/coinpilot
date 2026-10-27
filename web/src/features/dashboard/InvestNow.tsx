@@ -10,6 +10,7 @@ import {
   useHeldOperation,
 } from "@/api/operations";
 import { useConfig } from "@/api/queries";
+import { sessionGuard } from "@/api/signOut";
 import type { components } from "@/api/schema";
 import { FormError } from "@/components/FormError";
 import { LegList } from "@/components/LegList";
@@ -43,15 +44,16 @@ export function InvestNow() {
     },
   });
   // Its callbacks run whether or not this screen is still mounted.
-  const confirm = useMutation<InvestOut, unknown, InvestOut>({
+  const confirm = useMutation<InvestOut, unknown, InvestOut, () => boolean>({
     mutationKey: investKey,
     mutationFn: () => unwrap(api.POST("/api/invest")),
-    onSuccess: (result) => {
-      if (sentAnything(result.legs)) refreshAfter(client);
+    onMutate: () => sessionGuard(client),
+    onSuccess: (result, _, stillSame) => {
+      if (stillSame() && sentAnything(result.legs)) refreshAfter(client);
     },
-    onSettled: () => {
+    onSettled: (_data, _error, _vars, stillSame) => {
       sending.current = false;
-      historyChanged(client);
+      if (stillSame?.()) historyChanged(client);
     },
   });
 

@@ -9,6 +9,7 @@ import {
 } from "@tanstack/react-query";
 import { ApiError, api, unwrap } from "@/api/client";
 import type { components } from "@/api/schema";
+import { endSession } from "@/api/signOut";
 import { onboardingKey } from "@/features/auth/session";
 
 export const configKey = ["config"] as const;
@@ -119,9 +120,11 @@ export async function invalidateAccount(client: QueryClient): Promise<void> {
   );
 }
 
-// Nothing of this user may outlive the sign-out: the queries and the mutations
+// Nothing of this user may outlive the sign-out. The queries and the mutations
 // the cache holds (an invest outcome, a read of the balances) go before /login
-// opens. A failed request leaves everything as it was: the cookies still stand.
+// opens, and a request still in flight is cut off from the cache and the router
+// by endSession: when it answers, its callbacks find the session over and do
+// nothing. A failed request leaves everything as it was: the cookies still stand.
 export function useSignOut(): {
   signOut: () => Promise<void>;
   pending: boolean;
@@ -142,6 +145,7 @@ export function useSignOut(): {
       setPending(false);
       return;
     }
+    endSession(client);
     await client.cancelQueries();
     client.clear();
     await navigate("/login", { replace: true });

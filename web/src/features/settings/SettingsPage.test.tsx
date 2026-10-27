@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { afterEach, expect, test, vi } from "vitest";
 import type { Config } from "@/api/queries";
-import { approveKey, investKey } from "@/api/operations";
+import { approveKey, investKey, refreshAfter } from "@/api/operations";
 import { createQueryClient } from "@/providers";
 import { fakePlatform, type FakeState } from "@/test/fakePlatform";
 import { renderAt } from "@/test/render";
@@ -200,4 +200,119 @@ test("a button is disabled while its request is in flight", async () => {
   );
   release();
   await screen.findByText("slow");
+});
+
+test("a failed delete spends its confirmation", async () => {
+  const user = userEvent.setup();
+  const fake = platform();
+  let fail = true;
+  const router = renderAt("/settings", [
+    http.delete("/api/credentials", () =>
+      fail
+        ? HttpResponse.json({ detail: "kraken is down" }, { status: 500 })
+        : new HttpResponse(null, { status: 204 }),
+    ),
+    ...fake.handlers,
+  ]);
+  await user.click(await screen.findByRole("button", { name: "Delete key" }));
+  await user.click(screen.getByRole("button", { name: "Confirm: delete key" }));
+  await screen.findByText("kraken is down");
+  expect(
+    screen.queryByRole("button", { name: "Confirm: delete key" }),
+  ).not.toBeInTheDocument();
+  expect(router.state.location.pathname).toBe("/settings");
+  fail = false;
+  // a second tap is needed again
+  await user.click(screen.getByRole("button", { name: "Delete key" }));
+  expect(
+    screen.getByRole("button", { name: "Confirm: delete key" }),
+  ).toBeInTheDocument();
+});
+
+test("a key saved after a lost delete is not one tap from deletion", async () => {
+  const user = userEvent.setup();
+  const fake = platform();
+  renderAt("/settings", [
+    http.delete("/api/credentials", () => {
+      fake.state.registered = false;
+      return HttpResponse.json(
+        { detail: "no key is registered" },
+        { status: 404 },
+      );
+    }),
+    ...fake.handlers,
+  ]);
+  await user.click(await screen.findByRole("button", { name: "Delete key" }));
+  await user.click(screen.getByRole("button", { name: "Confirm: delete key" }));
+  await screen.findByText(/No key is saved/);
+  await user.type(screen.getByLabelText("API key"), "k");
+  await user.type(screen.getByLabelText("Private key"), "s");
+  await user.click(screen.getByRole("button", { name: "Verify & save" }));
+  await screen.findByText(/A key is saved/);
+  expect(
+    screen.queryByRole("button", { name: "Confirm: delete key" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.getByRole("button", { name: "Delete key" }),
+  ).toBeInTheDocument();
+});
+
+test("a request still in flight at sign out leaves nothing of the first user", async () => {
+  const user = userEvent.setup();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const proposal = {
+    version: 3,
+    legs: [],
+  } as unknown as NonNullable<FakeState["proposal"]>;
+  const fake = platform({
+    rebalanceResult: {
+      status: "PROPOSED",
+      legs: [],
+      proposal,
+      messages: [],
+    },
+  });
+  const client = createQueryClient();
+  const router = renderAt(
+    "/",
+    [
+      http.post("/api/rebalance", async () => {
+        await gate;
+        return HttpResponse.json(fake.state.rebalanceResult);
+      }),
+      http.post("/api/portfolio/refresh", async () => {
+        await gate;
+        return HttpResponse.json({
+          as_of: "2026-10-20T10:00:00Z",
+          fiat: "EUR",
+          total_value: "999",
+          cash: "999",
+          cash_target_pct: "0",
+          cash_weight_pct: null,
+          holdings: [],
+        });
+      }),
+      ...fake.handlers,
+    ],
+    client,
+  );
+  await user.click(
+    await screen.findByRole("button", { name: "Rebalance now" }),
+  );
+  refreshAfter(client);
+  await user.click(screen.getByRole("link", { name: "Settings" }));
+  await user.click(await screen.findByRole("button", { name: "Sign out" }));
+  await screen.findByRole("link", { name: "Sign in with Google" });
+  release();
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  expect(router.state.location.pathname).toBe("/login");
+  expect(
+    client
+      .getQueryCache()
+      .getAll()
+      .map((q) => q.queryKey),
+  ).toEqual([["me"]]);
 });

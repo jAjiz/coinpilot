@@ -16,6 +16,7 @@ import {
   refreshAfterKey,
   useHeldOperation,
 } from "@/api/operations";
+import { sessionGuard } from "@/api/signOut";
 import { proposalKey, useProposal, type Proposal } from "@/api/queries";
 import type { components } from "@/api/schema";
 import { FormError } from "@/components/FormError";
@@ -86,14 +87,15 @@ export function ProposalPage() {
         if (!(error instanceof ApiError && error.status === 404)) throw error;
       }
     },
-    onSuccess: async () => {
+    onMutate: () => sessionGuard(client),
+    onSuccess: async (_, __, stillSame) => {
       await client.invalidateQueries({ queryKey: proposalKey });
-      if (!approved.current) void navigate("/");
+      if (stillSame() && !approved.current) void navigate("/");
     },
     // The same answer as an approval's: the live proposal, to be read again.
-    onError: (error) => {
+    onError: (error, _, stillSame) => {
       const changed = superseded(error);
-      if (changed !== null) {
+      if (changed !== null && stillSame?.() !== false) {
         client.setQueryData(proposalKey, changed.proposal);
         setConfirming(null);
         setNotice(changed.messages);
@@ -106,13 +108,16 @@ export function ProposalPage() {
     mutationKey: approveKey,
     mutationFn: ({ version }: Approval) =>
       unwrap(api.POST("/api/proposal/approve", { body: { version } })),
-    onSuccess: (result) => {
+    onMutate: () => sessionGuard(client),
+    onSuccess: (result, _, stillSame) => {
       setConfirming(null);
+      if (!stillSame()) return;
       void client.invalidateQueries({ queryKey: proposalKey });
       if (sentAnything(result.legs)) refreshAfter(client);
     },
-    onError: (error) => {
+    onError: (error, _, stillSame) => {
       approved.current = false;
+      if (stillSame?.() === false) return;
       const changed = superseded(error);
       if (changed !== null) {
         client.setQueryData(proposalKey, changed.proposal);
@@ -123,9 +128,9 @@ export function ProposalPage() {
         setConfirming(null);
       }
     },
-    onSettled: () => {
+    onSettled: (_data, _error, _vars, stillSame) => {
       sending.current = false;
-      historyChanged(client);
+      if (stillSame?.()) historyChanged(client);
     },
   });
 

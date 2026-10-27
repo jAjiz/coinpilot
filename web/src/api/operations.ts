@@ -5,6 +5,7 @@ import {
 } from "@tanstack/react-query";
 import { ApiError, api, unwrap } from "@/api/client";
 import { portfolioKey } from "@/api/queries";
+import { sessionGuard } from "@/api/signOut";
 
 // The confirmations that may send orders, and the read of the balances after
 // one. They are held in the mutation cache, not in a screen's state, so the
@@ -70,19 +71,16 @@ export function historyChanged(client: QueryClient): void {
 export function refreshAfter(client: QueryClient): void {
   // Only the latest read's failure is the one an outcome shows.
   forget(client, refreshAfterKey);
-  const cache = client.getMutationCache();
-  const mutation = cache.build(client, {
-    mutationKey: refreshAfterKey,
-    mutationFn: () => unwrap(api.POST("/api/portfolio/refresh")),
-    // A sign-out clears the cache while this runs: its answer is then the
-    // previous user's, and must not land in the next one's.
-    onSuccess: (data) => {
-      if (cache.getAll().some((m) => m.mutationId === mutation.mutationId)) {
-        client.setQueryData(portfolioKey, data);
-      }
-    },
-  });
-  mutation
+  const stillSame = sessionGuard(client);
+  client
+    .getMutationCache()
+    .build(client, {
+      mutationKey: refreshAfterKey,
+      mutationFn: () => unwrap(api.POST("/api/portfolio/refresh")),
+      onSuccess: (data) => {
+        if (stillSame()) client.setQueryData(portfolioKey, data);
+      },
+    })
     .execute(undefined)
     // The failure is held in the cache and read from there.
     .catch(() => {});
