@@ -763,6 +763,7 @@
           "history"
         ],
         "summary": "Sessions",
+        "description": "The runs that affected the user, newest first. Runs that found nothing to do stay stored, unlisted.",
         "operationId": "sessions_api_sessions_get",
         "parameters": [
           {
@@ -775,6 +776,23 @@
               "minimum": 1,
               "default": 50,
               "title": "Limit"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before"
             }
           }
         ],

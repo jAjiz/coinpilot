@@ -139,3 +139,69 @@ def test_sessions_carry_their_id(api, make_user, login, fake_kraken):
     [entry] = api.get("/api/sessions", headers=headers).json()
 
     assert uuid.UUID(entry["id"])
+
+
+def _history(db_session, user, statuses, at=None):
+    from datetime import UTC, datetime, timedelta
+
+    from core.db.telemetry import finish_evaluation, start_evaluation
+
+    base = at or datetime(2026, 10, 27, 9, 0, tzinfo=UTC)
+    rows = []
+    for n, status in enumerate(statuses):
+        record = start_evaluation(db_session, user.id, started_at=base - timedelta(hours=n))
+        finish_evaluation(db_session, record.id, status=status, finished_at=base)
+        rows.append(record)
+    return rows
+
+
+def test_the_api_never_lists_nothing_to_do(api, db_session, make_user, login):
+    user = make_user()
+    _history(db_session, user, ["DONE", "NOTHING_TO_DO", "PARTIAL"])
+
+    listed = api.get("/api/sessions", headers=login(user)).json()
+
+    assert [row["status"] for row in listed] == ["DONE", "PARTIAL"]
+
+
+def test_an_idle_query_parameter_is_ignored(api, db_session, make_user, login):
+    user = make_user()
+    _history(db_session, user, ["DONE", "NOTHING_TO_DO", "PARTIAL"])
+
+    listed = api.get("/api/sessions", params={"idle": "true"}, headers=login(user)).json()
+
+    assert [row["status"] for row in listed] == ["DONE", "PARTIAL"]
+
+
+def test_pages_follow_the_cursor_without_repeating_or_skipping(api, db_session, make_user, login):
+    from datetime import UTC, datetime, timedelta
+
+    from core.db.telemetry import start_evaluation
+
+    user = make_user()
+    headers = login(user)
+    now = datetime(2026, 10, 27, 9, 0, tzinfo=UTC)
+    for at in [now, now, now, now - timedelta(hours=1), now - timedelta(hours=2)]:
+        start_evaluation(db_session, user.id, started_at=at)
+    everything = [row["id"] for row in api.get("/api/sessions", headers=headers).json()]
+
+    seen, before = [], None
+    while True:
+        params = {"limit": 2, **({"before": before} if before else {})}
+        page = api.get("/api/sessions", params=params, headers=headers).json()
+        if not page:
+            break
+        seen += [row["id"] for row in page]
+        before = page[-1]["id"]
+
+    assert len(everything) == 5
+    assert seen == everything
+
+
+def test_an_unknown_cursor_is_404(api, make_user, login):
+    import uuid
+
+    response = api.get("/api/sessions", params={"before": str(uuid.uuid4())}, headers=login(make_user()))
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "that session no longer exists"

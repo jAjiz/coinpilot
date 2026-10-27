@@ -122,3 +122,12 @@ def test_another_users_session_lists_no_orders(api, db_session, login, alice, bo
 
     assert api.get("/api/orders", params={"session": str(evaluation.id)}, headers=login(alice)).json() != []
     assert api.get("/api/orders", params={"session": str(evaluation.id)}, headers=login(bob)).json() == []
+
+
+def test_another_users_cursor_is_404(api, db_session, login, alice, bob):
+    evaluation = start_evaluation(db_session, alice.id, started_at=datetime(2026, 10, 27, tzinfo=UTC))
+
+    response = api.get("/api/sessions", params={"before": str(evaluation.id)}, headers=login(bob))
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "that session no longer exists"
