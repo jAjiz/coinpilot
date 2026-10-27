@@ -1,7 +1,7 @@
 import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import type { components } from "@/api/schema";
 import type { Config } from "@/api/queries";
 import { fakePlatform, type FakeState } from "@/test/fakePlatform";
@@ -522,4 +522,33 @@ test("closing an outcome forgets it", async () => {
   await act(() => router.navigate("/"));
   expect(await openButton()).toBeEnabled();
   expect(screen.queryByText("Every order was filled.")).toBeNull();
+});
+
+test("an outcome held past the default gcTime is still shown", async () => {
+  const user = userEvent.setup();
+  const fake = platform({
+    investPreview: out("PREVIEW", accepted(), true),
+    investResult: out("DONE", [leg("BTC", "60", "FILLED")], false),
+  });
+  const router = renderAt("/", fake.handlers);
+  await user.click(await openButton());
+  await user.click(
+    await screen.findByRole("button", { name: "Confirm: invest €100.00" }),
+  );
+  await screen.findByText("Every order was filled.");
+  await waitFor(() => expect(refreshes(fake)).toBe(1));
+
+  // Leaving schedules the collection of a mutation nobody observes.
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    await act(() => router.navigate("/history"));
+    vi.advanceTimersByTime(10 * 60 * 1000);
+  } finally {
+    vi.useRealTimers();
+  }
+  await act(() => router.navigate("/"));
+
+  expect(
+    await screen.findByText("Every order was filled."),
+  ).toBeInTheDocument();
 });

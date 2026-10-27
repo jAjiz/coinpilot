@@ -106,6 +106,9 @@ export function ProposalPage() {
   // Its callbacks run whether or not this screen is still mounted.
   const approve = useMutation({
     mutationKey: approveKey,
+    // Kept until it is closed or the user signs out: a screen that shows it
+    // again does not observe it, so the default gcTime would drop it.
+    gcTime: Infinity,
     mutationFn: ({ version }: Approval) =>
       unwrap(api.POST("/api/proposal/approve", { body: { version } })),
     onMutate: () => sessionGuard(client),
@@ -192,6 +195,8 @@ export function ProposalPage() {
     sending.current = true;
     approved.current = true;
     held.release();
+    // Only the read this confirmation starts belongs to its outcome.
+    refreshHeld.release();
     approve.mutate({ version, fiat });
   }
 

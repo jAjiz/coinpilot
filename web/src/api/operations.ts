@@ -9,9 +9,10 @@ import { sessionGuard } from "@/api/signOut";
 
 // The confirmations that may send orders, and the read of the balances after
 // one. They are held in the mutation cache, not in a screen's state, so the
-// user can leave while one runs and find its outcome when they come back. An
-// outcome nobody is looking at is dropped after the default gcTime (5
-// minutes); History keeps what it did.
+// user can leave while one runs and find its outcome when they come back.
+// `useMutationState` does not observe them, so they take an infinite gcTime:
+// an outcome stays until it is closed (`release`), replaced by the next
+// confirmation, or the user signs out.
 export const investKey = ["operation", "invest"] as const;
 export const approveKey = ["operation", "approve"] as const;
 export const refreshAfterKey = ["operation", "refresh"] as const;
@@ -76,6 +77,7 @@ export function refreshAfter(client: QueryClient): void {
     .getMutationCache()
     .build(client, {
       mutationKey: refreshAfterKey,
+      gcTime: Infinity,
       mutationFn: () => unwrap(api.POST("/api/portfolio/refresh")),
       onSuccess: (data) => {
         if (stillSame()) client.setQueryData(portfolioKey, data);

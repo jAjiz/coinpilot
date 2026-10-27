@@ -1,7 +1,7 @@
 import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { proposalKey, type Config, type Proposal } from "@/api/queries";
 import { createQueryClient } from "@/providers";
 import { fakePlatform, type FakeState } from "@/test/fakePlatform";
@@ -702,4 +702,90 @@ test("a lost answer after approve sends you to History", async () => {
   await user.click(screen.getByRole("button", { name: "Close" }));
   expect(screen.queryByText(/the answer was lost/)).toBeNull();
   expect(await approveButton()).toBeEnabled();
+});
+
+test("an approval held past the default gcTime is still shown", async () => {
+  const user = userEvent.setup();
+  const fake = platform();
+  const router = renderAt("/proposal", fake.handlers);
+  await user.click(await approveButton());
+  await user.click(await screen.findByRole("button", { name: "Confirm" }));
+  await screen.findByText("Every order was filled.");
+  await waitFor(() =>
+    expect(fake.requests.map((r) => r.path)).toContain(
+      "/api/portfolio/refresh",
+    ),
+  );
+
+  // Leaving schedules the collection of a mutation nobody observes.
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    await act(() => router.navigate("/history"));
+    vi.advanceTimersByTime(10 * 60 * 1000);
+  } finally {
+    vi.useRealTimers();
+  }
+  await act(() => router.navigate("/proposal"));
+
+  expect(
+    await screen.findByText("Every order was filled."),
+  ).toBeInTheDocument();
+});
+
+test("an approval that sent nothing does not show an earlier invest's failed refresh", async () => {
+  const user = userEvent.setup();
+  const filledLeg = {
+    ...leg("BTC", "buy", "60", null),
+    status: "FILLED",
+    cl_ord_id: null,
+    txid: null,
+    cost: null,
+    executed_volume: null,
+    executed_price: null,
+    fee: null,
+    error: null,
+    volume: null,
+  };
+  const fake = platform({
+    investPreview: {
+      status: "PREVIEW",
+      preview: true,
+      legs: [{ ...filledLeg, status: "VALIDATED" }],
+      messages: [],
+    },
+    investResult: {
+      status: "DONE",
+      preview: false,
+      legs: [filledLeg],
+      messages: [],
+    },
+    approveResult: {
+      status: "ERROR",
+      legs: [
+        { ...filledLeg, status: "FAILED", error: "EOrder:Insufficient funds" },
+      ],
+      proposal: null,
+      messages: [],
+    },
+  });
+  const router = renderAt("/", [
+    http.post("/api/portfolio/refresh", () =>
+      HttpResponse.json({ detail: "down" }, { status: 503 }),
+    ),
+    ...fake.handlers,
+  ]);
+  await user.click(await screen.findByRole("button", { name: "Invest now" }));
+  await user.click(
+    await screen.findByRole("button", { name: "Confirm: invest €60.00" }),
+  );
+  await screen.findByText(/The new balances could not be read/);
+
+  await act(() => router.navigate("/proposal"));
+  await user.click(await approveButton());
+  await user.click(await screen.findByRole("button", { name: "Confirm" }));
+
+  expect(
+    await screen.findByText("The operation failed. Nothing more was sent."),
+  ).toBeInTheDocument();
+  expect(screen.queryByText(/The new balances could not be read/)).toBeNull();
 });

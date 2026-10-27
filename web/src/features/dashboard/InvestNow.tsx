@@ -46,6 +46,9 @@ export function InvestNow() {
   // Its callbacks run whether or not this screen is still mounted.
   const confirm = useMutation<InvestOut, unknown, InvestOut, () => boolean>({
     mutationKey: investKey,
+    // Kept until it is closed or the user signs out: a screen that shows it
+    // again does not observe it, so the default gcTime would drop it.
+    gcTime: Infinity,
     mutationFn: () => unwrap(api.POST("/api/invest")),
     onMutate: () => sessionGuard(client),
     onSuccess: (result, _, stillSame) => {
@@ -80,6 +83,8 @@ export function InvestNow() {
     if (sending.current) return;
     sending.current = true;
     held.release();
+    // Only the read this confirmation starts belongs to its outcome.
+    refreshHeld.release();
     confirm.mutate(result);
   }
 
