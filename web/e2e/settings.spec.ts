@@ -84,12 +84,32 @@ function signedIn() {
   };
 }
 
+// The app's formatRun, in the time zone the tests run in (Europe/Madrid).
+function formatRun(at: string): string {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Europe/Madrid",
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(new Date(at))
+      .map((p) => [p.type, p.value]),
+  );
+  return `${parts.weekday} ${parts.day} ${parts.month} at ${parts.hour}:${parts.minute}`;
+}
+
 test("a cadence changed in settings moves the next run", async ({ page }) => {
   const state = { config: { ...CONFIG } };
+  const patches: Record<string, unknown>[] = [];
   await mockApi(page, {
     ...signedIn(),
     "GET /api/config": () => ok(state.config),
     "PATCH /api/config": (body): Reply => {
+      patches.push(body as Record<string, unknown>);
       const merged = { ...state.config, ...(body as object) };
       merged.next_invest_at = nextRun(
         merged,
@@ -117,8 +137,16 @@ test("a cadence changed in settings moves the next run", async ({ page }) => {
   await expect(
     page.getByRole("button", { name: "Edit automation" }),
   ).toBeVisible();
-  await expect(next).not.toContainText("Monday 7 January");
-  await expect(next).toBeVisible();
+
+  expect(patches).toHaveLength(1);
+  expect(patches[0]).toMatchObject({
+    invest_cadence_mode: "INTERVAL",
+    invest_interval_months: 1,
+    invest_interval_days: null,
+  });
+  const expected = nextRun(state.config, "invest", null);
+  expect(expected).not.toBeNull();
+  await expect(next).toHaveText(`Next invest: ${formatRun(expected!)}`);
 });
 
 test("history shows a run and its orders", async ({ page }) => {
