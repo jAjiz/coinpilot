@@ -27,7 +27,7 @@ def test_rebalancing_needs_a_signed_in_user(api):
     assert api.post("/api/rebalance").status_code == 401
     assert api.get("/api/proposal").status_code == 401
     assert api.post("/api/proposal/approve", json={"version": 1}).status_code == 401
-    assert api.delete("/api/proposal").status_code == 401
+    assert api.delete("/api/proposal?version=1").status_code == 401
 
 
 def test_rebalancing_needs_settings_first(api, make_user, login):

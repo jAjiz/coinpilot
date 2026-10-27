@@ -102,7 +102,7 @@ def test_a_proposal_is_not_shared(api, login, bob, alice_ready, fake_kraken):
 
     assert api.get("/api/proposal", headers=login(bob)).status_code == 404
     assert api.post("/api/proposal/approve", json={"version": 1}, headers=login(bob)).status_code == 404
-    assert api.delete("/api/proposal", headers=login(bob)).status_code == 404
+    assert api.delete("/api/proposal?version=1", headers=login(bob)).status_code == 404
     assert api.get("/api/proposal", headers=alice_ready).json()["version"] == 1
 
 
