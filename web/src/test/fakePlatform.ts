@@ -14,6 +14,7 @@ type LegOut = components["schemas"]["LegOut"];
 export type FakeState = {
   config: Config | null; // null: no settings yet (GET -> 404)
   registered: boolean;
+  signedIn: boolean; // POST /api/auth/logout ends it: /api/auth/me then answers 401
   assets: { asset: string; pair: string; target_pct: string }[];
   portfolio: { cash: string; holdings: HoldingOut[] }; // what a refresh returns
   untradable: string[]; // PUT -> 422 "kraken has no tradable {X}/{fiat} pair"
@@ -38,6 +39,7 @@ const ME = { id: "u1", email: "a@b.c", provider: "google", status: "active" };
 const DEFAULTS: FakeState = {
   config: null,
   registered: false,
+  signedIn: true,
   assets: [],
   portfolio: { cash: "0", holdings: [] },
   untradable: [],
@@ -174,7 +176,15 @@ export function fakePlatform(initial: Partial<FakeState> = {}): {
   }
 
   const handlers = [
-    http.get("/api/auth/me", () => HttpResponse.json(ME)),
+    http.get("/api/auth/me", () =>
+      state.signedIn ? HttpResponse.json(ME) : detail(401, "not signed in"),
+    ),
+    http.post("/api/auth/refresh", () => detail(401, "refresh refused")),
+    http.post("/api/auth/logout", async ({ request }) => {
+      await record(request);
+      state.signedIn = false;
+      return new HttpResponse(null, { status: 204 });
+    }),
 
     http.get("/api/config", () =>
       state.config === null
@@ -226,6 +236,13 @@ export function fakePlatform(initial: Partial<FakeState> = {}): {
       const { status, body } = state.keyReply;
       if (status >= 200 && status < 300) state.registered = true;
       return HttpResponse.json(body as JsonBodyType, { status });
+    }),
+
+    http.delete("/api/credentials", async ({ request }) => {
+      await record(request);
+      if (!state.registered) return detail(404, "no key is registered");
+      state.registered = false;
+      return new HttpResponse(null, { status: 204 });
     }),
 
     http.get("/api/assets", () =>

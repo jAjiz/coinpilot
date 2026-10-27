@@ -1,3 +1,5 @@
+import { useState } from "react";
+import { useNavigate } from "react-router";
 import {
   useInfiniteQuery,
   useMutation,
@@ -115,4 +117,35 @@ export async function invalidateAccount(client: QueryClient): Promise<void> {
       client.invalidateQueries({ queryKey }),
     ),
   );
+}
+
+// Nothing of this user may outlive the sign-out: the queries and the mutations
+// the cache holds (an invest outcome, a read of the balances) go before /login
+// opens. A failed request leaves everything as it was: the cookies still stand.
+export function useSignOut(): {
+  signOut: () => Promise<void>;
+  pending: boolean;
+  error: unknown;
+} {
+  const client = useQueryClient();
+  const navigate = useNavigate();
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+
+  async function signOut() {
+    setPending(true);
+    setError(null);
+    try {
+      await unwrap(api.POST("/api/auth/logout"));
+    } catch (failure) {
+      setError(failure);
+      setPending(false);
+      return;
+    }
+    await client.cancelQueries();
+    client.clear();
+    await navigate("/login", { replace: true });
+  }
+
+  return { signOut, pending, error };
 }

@@ -24,3 +24,12 @@ export function refusalMessage(detail: unknown): string | null {
       return null;
   }
 }
+
+// "20 October 2026", in the browser's time zone; null when the key was never verified.
+export function verifiedOn(
+  validatedAt: string | null | undefined,
+): string | null {
+  return validatedAt
+    ? new Date(validatedAt).toLocaleDateString("en-GB", { dateStyle: "long" })
+    : null;
+}

@@ -134,6 +134,9 @@ test("a failed background refetch keeps the page", async () => {
           : HttpResponse.json({ detail: "platform down" }, { status: 503 });
       }),
       onboarded,
+      http.get("/api/credentials/status", () =>
+        HttpResponse.json({ registered: false }),
+      ),
     ],
     client,
   );
