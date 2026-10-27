@@ -652,8 +652,9 @@ test("sign out lands on the sign-in page", ...)
 
 ## What you verify after the deploy
 
-The migration only adds a column, so a rollback to phase 12's image still works against
-the migrated database.
+The migration only adds columns: `session_id`, and `seq`, an identity that records the
+order the attempts were written in. Phase 12's image writes neither, and the identity fills
+`seq` for it, so a rollback to phase 12's image still works against the migrated database.
 
 1. Deploy. Open History on the phone. Only runs that did something, or failed, are
    listed; "Load more" goes back further. The `sessions` table still holds every run.
