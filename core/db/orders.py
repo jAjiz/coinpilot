@@ -130,25 +130,26 @@ def has_unresolved(session: Session, user_id: uuid.UUID) -> bool:
 def list_orders(
     session: Session, user_id: uuid.UUID, limit: int = 50, *, session_id: uuid.UUID | None = None
 ) -> list[Order]:
-    """The user's newest orders. With `session_id`, that session's orders, oldest first.
+    """The user's newest orders. With `session_id`, that session's orders, in the order
+    they were sent.
 
     The user filter stays with the session filter: another user's session id lists nothing.
     """
     # `created_at` alone is not enough. PostgreSQL's `now()` is the transaction
-    # timestamp, so every leg of one rebalance carries the same value and the order of
-    # the page would be arbitrary. The client id breaks the tie.
+    # timestamp, so legs written in one transaction carry the same value. `seq` is the
+    # order the rows were written in, and each leg is written before it is sent.
     if session_id is not None:
         stmt = (
             select(Order)
             .where(Order.user_id == user_id, Order.session_id == session_id)
-            .order_by(Order.created_at, Order.cl_ord_id)
+            .order_by(Order.seq)
             .limit(limit)
         )
         return list(session.execute(stmt).scalars())
     stmt = (
         select(Order)
         .where(Order.user_id == user_id)
-        .order_by(Order.created_at.desc(), Order.cl_ord_id.desc())
+        .order_by(Order.created_at.desc(), Order.seq.desc())
         .limit(limit)
     )
     return list(session.execute(stmt).scalars())

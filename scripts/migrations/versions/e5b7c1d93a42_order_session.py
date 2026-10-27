@@ -28,10 +28,14 @@ def upgrade() -> None:
         "fk_orders_session_id_sessions", "orders", "sessions", ["session_id"], ["id"], ondelete="SET NULL"
     )
     op.create_index("ix_orders_session_id", "orders", ["session_id"])
+    # The order the attempts were written in, which is the order a session sent them in.
+    # The rows already there are numbered in no particular order; none has a session.
+    op.add_column("orders", sa.Column("seq", sa.BigInteger(), sa.Identity(), nullable=False))
 
 
 def downgrade() -> None:
     """Downgrade schema."""
+    op.drop_column("orders", "seq")
     op.drop_index("ix_orders_session_id", table_name="orders")
     op.drop_constraint("fk_orders_session_id_sessions", "orders", type_="foreignkey")
     op.drop_column("orders", "session_id")

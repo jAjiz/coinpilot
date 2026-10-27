@@ -226,14 +226,16 @@ def test_deleting_a_session_keeps_its_orders(db_session: Session, make_user):
     assert [row.cl_ord_id for row in list_orders(db_session, user.id)] == ["cl-kept"]
 
 
-def test_the_orders_of_a_session_are_its_own_and_oldest_first(db_session: Session, make_user):
+def test_the_orders_of_a_session_are_its_own_and_in_the_order_they_were_sent(db_session: Session, make_user):
+    """One transaction and one clock: `created_at` and `attempted_at` tie, and the client
+    ids sort the other way. Only the order of the writes tells which leg went first."""
     user = make_user()
     first = start_evaluation(db_session, user.id, started_at=NOW)
     second = start_evaluation(db_session, user.id, started_at=NOW)
     for cl_ord_id, session_id in (("cl-b", first.id), ("cl-a", first.id), ("cl-c", second.id)):
-        _attempt(db_session, user.id, cl_ord_id, session_id=session_id)
+        _attempt(db_session, user.id, cl_ord_id, session_id=session_id, attempted_at=NOW)
 
     listed = list_orders(db_session, user.id, session_id=first.id)
 
-    assert [row.cl_ord_id for row in listed] == ["cl-a", "cl-b"]
+    assert [row.cl_ord_id for row in listed] == ["cl-b", "cl-a"]
     assert list_orders(db_session, make_user().id, session_id=first.id) == []

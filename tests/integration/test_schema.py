@@ -126,3 +126,10 @@ def test_migration_adds_order_session_id(db_session: Session):
         ("sessions", "SET NULL")
     ]
     assert "ix_orders_session_id" in indexes
+
+
+def test_migration_numbers_orders_in_the_order_they_are_written(db_session: Session):
+    columns = {column["name"]: column for column in inspect(db_session.get_bind()).get_columns("orders")}
+
+    assert columns["seq"]["nullable"] is False
+    assert columns["seq"].get("identity") is not None

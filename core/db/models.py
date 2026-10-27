@@ -11,10 +11,12 @@ from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Identity,
     Index,
     Integer,
     LargeBinary,
@@ -192,6 +194,10 @@ class Order(TimestampMixin, Base):
     session_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("sessions.id", ondelete="SET NULL"), nullable=True
     )
+    # The order the attempts were written in. Each leg is written before it is sent, so
+    # within a session this is the order they were sent in. `created_at` cannot tell:
+    # it is the transaction's time, and the executor's clock may give two legs one time.
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(), nullable=False)
     # Unique across the whole table, not per user. Kraken requires uniqueness among open
     # orders, and a global rule is both stronger and simpler to reason about.
     cl_ord_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
