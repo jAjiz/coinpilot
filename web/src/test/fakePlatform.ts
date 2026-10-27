@@ -7,6 +7,8 @@ type HoldingOut = components["schemas"]["HoldingOut"];
 type ConfigPatch = components["schemas"]["ConfigPatch"];
 type InvestOut = components["schemas"]["InvestOut"];
 type RebalanceOut = components["schemas"]["RebalanceOut"];
+type EvaluationOut = components["schemas"]["EvaluationOut"];
+type OrderOut = components["schemas"]["OrderOut"];
 type LegOut = components["schemas"]["LegOut"];
 
 export type FakeState = {
@@ -23,6 +25,8 @@ export type FakeState = {
   rebalanceResult: RebalanceOut; // POST /api/rebalance; its proposal becomes live
   // POST /api/proposal/approve; unset: DONE, every order of the live proposal FILLED
   approveResult?: RebalanceOut;
+  sessions: EvaluationOut[]; // GET /api/sessions never lists NOTHING_TO_DO
+  orders: OrderOut[]; // GET /api/orders
   nextInvestAt: string;
   nextRebalanceAt: string;
 };
@@ -71,6 +75,8 @@ const DEFAULTS: FakeState = {
     proposal: null,
     messages: ["the drift is below the threshold"],
   },
+  sessions: [],
+  orders: [],
   nextInvestAt: "2026-10-26T11:20:00Z",
   nextRebalanceAt: "2026-11-01T11:20:00Z",
 };
@@ -299,6 +305,37 @@ export function fakePlatform(initial: Partial<FakeState> = {}): {
       const result = state.approveResult ?? filled(state.proposal);
       state.proposal = null;
       return HttpResponse.json(result);
+    }),
+
+    // Newest first by (started_at, id), as the platform orders them.
+    http.get("/api/sessions", ({ request }) => {
+      const query = new URL(request.url).searchParams;
+      const limit = Number(query.get("limit") ?? 50);
+      const before = query.get("before");
+      const listed = state.sessions
+        .filter((s) => s.status !== "NOTHING_TO_DO")
+        .sort((a, b) =>
+          a.started_at === b.started_at
+            ? b.id.localeCompare(a.id)
+            : b.started_at.localeCompare(a.started_at),
+        );
+      let from = 0;
+      if (before !== null) {
+        const at = listed.findIndex((s) => s.id === before);
+        if (at === -1) return detail(404, "that session no longer exists");
+        from = at + 1;
+      }
+      return HttpResponse.json(listed.slice(from, from + limit));
+    }),
+    // A session's orders, oldest first.
+    http.get("/api/orders", ({ request }) => {
+      const query = new URL(request.url).searchParams;
+      const limit = Number(query.get("limit") ?? 50);
+      const session = query.get("session");
+      const listed = state.orders
+        .filter((o) => session === null || o.session_id === session)
+        .sort((a, b) => a.created_at.localeCompare(b.created_at));
+      return HttpResponse.json(listed.slice(0, limit));
     }),
 
     http.post("/api/invest", async ({ request }) => {

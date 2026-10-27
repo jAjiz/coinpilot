@@ -1,4 +1,5 @@
 import {
+  useInfiniteQuery,
   useMutation,
   useQuery,
   useQueryClient,
@@ -49,6 +50,40 @@ export function useProposal() {
   return useQuery({
     queryKey: proposalKey,
     queryFn: () => orNull(api.GET("/api/proposal")),
+  });
+}
+
+export const SESSIONS_PAGE = 20;
+
+// Newest first; each page continues strictly after the last id of the one before.
+export function useSessions() {
+  return useInfiniteQuery({
+    queryKey: ["sessions"],
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam }) =>
+      unwrap(
+        api.GET("/api/sessions", {
+          params: {
+            query: {
+              limit: SESSIONS_PAGE,
+              ...(pageParam === null ? {} : { before: pageParam }),
+            },
+          },
+        }),
+      ),
+    getNextPageParam: (last) =>
+      last.length < SESSIONS_PAGE ? undefined : last[last.length - 1].id,
+  });
+}
+
+export function useSessionOrders(sessionId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ["orders", sessionId],
+    queryFn: () =>
+      unwrap(
+        api.GET("/api/orders", { params: { query: { session: sessionId } } }),
+      ),
+    enabled,
   });
 }
 
