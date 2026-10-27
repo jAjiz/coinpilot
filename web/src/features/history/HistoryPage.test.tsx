@@ -1,8 +1,9 @@
-import { screen } from "@testing-library/react";
+import { act, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { expect, test, vi } from "vitest";
 import type { Config } from "@/api/queries";
+import { createQueryClient } from "@/providers";
 import type { components } from "@/api/schema";
 import { fakePlatform, type FakeState } from "@/test/fakePlatform";
 import { renderAt } from "@/test/render";
@@ -216,4 +217,62 @@ test("a slow config shows the orders skeleton, not a crash", async () => {
   expect(screen.queryByText("Buy BTC for €50.00")).toBeNull();
   release();
   expect(await screen.findByText("Buy BTC for €50.00")).toBeInTheDocument();
+});
+
+test("a failed load more keeps the runs and offers a retry", async () => {
+  const user = userEvent.setup();
+  const all = Array.from({ length: 25 }, (_, i) => session(i + 1));
+  const fake = platform({ sessions: all });
+  let fail = true;
+  renderAt("/history", [
+    http.get("/api/sessions", ({ request }) =>
+      fail && new URL(request.url).searchParams.has("before")
+        ? HttpResponse.json({ detail: "platform down" }, { status: 500 })
+        : undefined,
+    ),
+    ...fake.handlers,
+  ]);
+  await screen.findAllByRole("button", { name: /Invest/ });
+  await user.click(screen.getByRole("button", { name: "Load more" }));
+
+  expect(await screen.findByText("platform down")).toBeInTheDocument();
+  expect(screen.getAllByRole("button", { name: /Invest/ })).toHaveLength(20);
+  expect(screen.getByRole("heading", { name: "History" })).toBeInTheDocument();
+  fail = false;
+  await user.click(screen.getByRole("button", { name: "Try again" }));
+  await vi.waitFor(() =>
+    expect(screen.getAllByRole("button", { name: /Invest/ })).toHaveLength(25),
+  );
+  expect(screen.queryByText("platform down")).toBeNull();
+});
+
+test("a failed background read keeps the runs on screen", async () => {
+  const user = userEvent.setup();
+  const fake = platform({ sessions: [session(5)] });
+  const client = createQueryClient();
+  let fail = false;
+  renderAt(
+    "/history",
+    [
+      http.get("/api/sessions", () =>
+        fail
+          ? HttpResponse.json({ detail: "platform down" }, { status: 500 })
+          : undefined,
+      ),
+      ...fake.handlers,
+    ],
+    client,
+  );
+  await screen.findByText("Invest · scheduled");
+  fail = true;
+  await act(() => client.refetchQueries({ queryKey: ["sessions"] }));
+
+  expect(await screen.findByText("platform down")).toBeInTheDocument();
+  expect(screen.getByText("Invest · scheduled")).toBeInTheDocument();
+  fail = false;
+  await user.click(screen.getByRole("button", { name: "Try again" }));
+  await vi.waitFor(() =>
+    expect(screen.queryByText("platform down")).toBeNull(),
+  );
+  expect(screen.getByText("Invest · scheduled")).toBeInTheDocument();
 });

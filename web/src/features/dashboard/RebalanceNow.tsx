@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router";
 import { api, operationError, unwrap } from "@/api/client";
+import { historyChanged } from "@/api/operations";
 import { sessionGuard } from "@/api/signOut";
 import { portfolioKey, proposalKey } from "@/api/queries";
 import { FormError } from "@/components/FormError";
@@ -32,8 +33,10 @@ export function RebalanceNow() {
       // An evaluation that finds nothing may have withdrawn a proposal.
       await client.invalidateQueries({ queryKey: proposalKey });
     },
-    onSettled: () => {
+    onSettled: (_data, _error, _vars, stillSame) => {
       sending.current = false;
+      // A proposal is a session too: History reads it again.
+      if (stillSame?.()) historyChanged(client);
     },
   });
 
