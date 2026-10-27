@@ -1,27 +1,36 @@
 import { useRef, useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, operationError, unwrap } from "@/api/client";
-import { useConfig, useRefreshPortfolio } from "@/api/queries";
+import {
+  historyChanged,
+  investKey,
+  isLostAnswer,
+  refreshAfter,
+  refreshAfterKey,
+  useHeldOperation,
+} from "@/api/operations";
+import { useConfig } from "@/api/queries";
 import type { components } from "@/api/schema";
 import { FormError } from "@/components/FormError";
 import { LegList } from "@/components/LegList";
-import { OperationOutcome } from "@/components/OperationOutcome";
+import { LostAnswer, OperationOutcome } from "@/components/OperationOutcome";
 import { Button } from "@/components/ui/button";
 import { useOnline } from "@/features/shell/useOnline";
 import { formatMoney, sum } from "@/lib/decimal";
 import { sentAnything } from "@/lib/operations";
 
 type InvestOut = components["schemas"]["InvestOut"];
-type Step =
-  | { kind: "idle" }
-  | { kind: "preview"; result: InvestOut }
-  | { kind: "outcome"; result: InvestOut };
+type Step = { kind: "idle" } | { kind: "preview"; result: InvestOut };
 
 export function InvestNow() {
+  const client = useQueryClient();
   const config = useConfig();
-  const refresh = useRefreshPortfolio();
   const online = useOnline();
   const [step, setStep] = useState<Step>({ kind: "idle" });
+  // The confirmed invest, held by the cache: it outlives this screen. Its
+  // variables are the preview that was confirmed.
+  const held = useHeldOperation<InvestOut, InvestOut>(investKey);
+  const refreshHeld = useHeldOperation(refreshAfterKey);
   // Set synchronously, so a second tap in the same tick cannot send again.
   const sending = useRef(false);
 
@@ -33,14 +42,16 @@ export function InvestNow() {
       sending.current = false;
     },
   });
-  const confirm = useMutation({
+  // Its callbacks run whether or not this screen is still mounted.
+  const confirm = useMutation<InvestOut, unknown, InvestOut>({
+    mutationKey: investKey,
     mutationFn: () => unwrap(api.POST("/api/invest")),
     onSuccess: (result) => {
-      setStep({ kind: "outcome", result });
-      if (sentAnything(result.legs)) refresh.mutate();
+      if (sentAnything(result.legs)) refreshAfter(client);
     },
     onSettled: () => {
       sending.current = false;
+      historyChanged(client);
     },
   });
 
@@ -50,32 +61,63 @@ export function InvestNow() {
   function leave() {
     preview.reset();
     confirm.reset();
+    held.release();
     // A failed read of the balances belongs to the outcome being left.
-    refresh.reset();
+    refreshHeld.release();
     setStep({ kind: "idle" });
   }
 
   function startPreview() {
     if (sending.current) return;
     sending.current = true;
-    confirm.reset();
+    held.release();
     preview.mutate();
   }
 
-  function send() {
+  function send(result: InvestOut) {
     if (sending.current) return;
     sending.current = true;
-    confirm.mutate();
+    held.release();
+    confirm.mutate(result);
   }
 
+  // A held confirmation decides the step; without one, this screen's own.
+  const lost = held.state === "error" && isLostAnswer(held.error);
+  const outcome = held.state === "success" ? held.data : undefined;
+  const previewed =
+    held.state === "idle"
+      ? step.kind === "preview"
+        ? step.result
+        : null
+      : (held.variables ?? null);
+
   // The step that failed stays on screen; its error is the one shown.
-  const failure = step.kind === "idle" ? preview : confirm;
-  const error = failure.isError ? operationError(failure.error) : null;
+  let error: string | null = null;
+  if (held.state === "error" && !lost) error = operationError(held.error);
+  else if (previewed === null && preview.isError) {
+    error = operationError(preview.error);
+  }
 
   return (
     <section className="flex flex-col items-start gap-3">
       <h2 className="text-lg font-semibold">Invest now</h2>
-      {step.kind === "idle" && (
+      {outcome !== undefined ? (
+        <OperationOutcome result={outcome} fiat={fiat}>
+          <Button variant="outline" onClick={leave}>
+            Close
+          </Button>
+        </OperationOutcome>
+      ) : previewed !== null ? (
+        <PreviewStep
+          result={previewed}
+          fiat={fiat}
+          pending={held.state === "pending"}
+          lost={lost}
+          online={online}
+          onConfirm={() => send(previewed)}
+          onClose={leave}
+        />
+      ) : (
         <>
           <p>
             Invest the free {fiat} toward your targets. You see the orders
@@ -89,26 +131,12 @@ export function InvestNow() {
           </Button>
         </>
       )}
-      {step.kind === "preview" && (
-        <PreviewStep
-          result={step.result}
-          fiat={fiat}
-          pending={confirm.isPending}
-          online={online}
-          onConfirm={send}
-          onClose={leave}
-        />
-      )}
-      {step.kind === "outcome" && (
-        <OperationOutcome
-          result={step.result}
-          fiat={fiat}
-          refreshError={refresh.error}
-        >
+      {lost && (
+        <LostAnswer>
           <Button variant="outline" onClick={leave}>
             Close
           </Button>
-        </OperationOutcome>
+        </LostAnswer>
       )}
       <FormError message={error} />
     </section>
@@ -119,6 +147,7 @@ function PreviewStep({
   result,
   fiat,
   pending,
+  lost,
   online,
   onConfirm,
   onClose,
@@ -126,6 +155,8 @@ function PreviewStep({
   result: InvestOut;
   fiat: string;
   pending: boolean;
+  // The confirmed invest may have been sent: nothing to confirm or cancel.
+  lost: boolean;
   online: boolean;
   onConfirm: () => void;
   onClose: () => void;
@@ -173,12 +204,14 @@ function PreviewStep({
             Prices move: the orders are computed again when you confirm.
           </p>
           <div className="flex gap-2">
-            <Button onClick={onConfirm} disabled={pending || !online}>
+            <Button onClick={onConfirm} disabled={pending || lost || !online}>
               {pending ? "Investing…" : `Confirm: invest ${total}`}
             </Button>
-            <Button variant="outline" onClick={onClose} disabled={pending}>
-              Cancel
-            </Button>
+            {!lost && (
+              <Button variant="outline" onClick={onClose} disabled={pending}>
+                Cancel
+              </Button>
+            )}
           </div>
         </>
       )}

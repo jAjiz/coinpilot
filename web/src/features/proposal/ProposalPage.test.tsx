@@ -610,3 +610,96 @@ test("a proposal withdrawn under an open confirmation closes it", async () => {
     screen.getByText("The proposal changed; review it again."),
   ).toBeInTheDocument();
 });
+
+const refreshes = (fake: ReturnType<typeof platform>) =>
+  fake.requests.filter((r) => r.path === "/api/portfolio/refresh").length;
+
+test("leaving while the approval is in flight keeps its outcome", async () => {
+  const user = userEvent.setup();
+  const fake = platform();
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const router = renderAt("/proposal", [
+    http.post("/api/proposal/approve", async () => {
+      await gate;
+      fake.state.proposal = null;
+      return HttpResponse.json({
+        status: "DONE",
+        legs: [
+          sent("BTC", "buy", "50", "FILLED"),
+          sent("ETH", "sell", "20.5", "FILLED"),
+        ],
+        proposal: null,
+        messages: [],
+      });
+    }),
+    ...fake.handlers,
+  ]);
+  await user.click(await approveButton());
+  await user.click(await screen.findByRole("button", { name: "Confirm" }));
+  await act(() => router.navigate("/history"));
+  await screen.findByRole("heading", { name: "History" });
+
+  // Back while it is still in flight: the pending button.
+  await act(() => router.navigate("/proposal"));
+  expect(
+    await screen.findByRole("button", { name: "Sending…" }),
+  ).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Dismiss" })).toBeDisabled();
+
+  await act(() => router.navigate("/"));
+  await screen.findByRole("heading", { name: "Home" });
+  release();
+  await waitFor(() => expect(refreshes(fake)).toBe(1));
+
+  await act(() => router.navigate("/proposal"));
+  expect(
+    await screen.findByText("Every order was filled."),
+  ).toBeInTheDocument();
+  expect(screen.getAllByText("Filled")).toHaveLength(2);
+  expect(refreshes(fake)).toBe(1);
+
+  // Leaving by the link closes it.
+  await user.click(screen.getByRole("link", { name: "Back to Home" }));
+  await screen.findByRole("heading", { name: "Home" });
+  await act(() => router.navigate("/proposal"));
+  expect(
+    await screen.findByText("There is no proposal to review."),
+  ).toBeInTheDocument();
+});
+
+test("a lost answer after approve sends you to History", async () => {
+  const user = userEvent.setup();
+  const fake = platform();
+  const router = renderAt("/proposal", [
+    http.post("/api/proposal/approve", () =>
+      HttpResponse.json({ detail: "bad gateway" }, { status: 502 }),
+    ),
+    ...fake.handlers,
+  ]);
+  await user.click(await approveButton());
+  await user.click(await screen.findByRole("button", { name: "Confirm" }));
+  expect(
+    await screen.findByText(
+      "We don't know whether the orders were sent: the answer was lost. Check History before trying again.",
+    ),
+  ).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Open History" })).toHaveAttribute(
+    "href",
+    "/history",
+  );
+  expect(screen.getByRole("button", { name: "Confirm" })).toBeDisabled();
+  expect(screen.queryByText("bad gateway")).toBeNull();
+
+  await act(() => router.navigate("/history"));
+  await screen.findByRole("heading", { name: "History" });
+  await act(() => router.navigate("/proposal"));
+  expect(await screen.findByText(/the answer was lost/)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Confirm" })).toBeDisabled();
+
+  await user.click(screen.getByRole("button", { name: "Close" }));
+  expect(screen.queryByText(/the answer was lost/)).toBeNull();
+  expect(await approveButton()).toBeEnabled();
+});

@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
+import { Link } from "react-router";
 import { operationError } from "@/api/client";
+import { refreshAfterKey, useHeldOperation } from "@/api/operations";
 import type { components } from "@/api/schema";
 import { FormError } from "@/components/FormError";
 import { LegList } from "@/components/LegList";
@@ -12,14 +14,13 @@ type Leg = components["schemas"]["LegOut"];
 export function OperationOutcome({
   result,
   fiat,
-  refreshError,
   children,
 }: {
   result: { status: string; legs: Leg[]; messages: string[] };
   fiat: string;
-  refreshError: unknown;
   children?: ReactNode;
 }) {
+  const refresh = useHeldOperation(refreshAfterKey);
   return (
     <>
       <p>{outcomeSentence(result.status)}</p>
@@ -30,11 +31,31 @@ export function OperationOutcome({
       {children}
       <FormError
         message={
-          refreshError == null
-            ? null
-            : `The new balances could not be read. ${operationError(refreshError)}`
+          refresh.state === "error"
+            ? `The new balances could not be read. ${operationError(refresh.error)}`
+            : null
         }
       />
     </>
+  );
+}
+
+// A confirmation whose answer never came back may have sent orders: it is not
+// an error to retry. The caller's own way out goes in `children`.
+export function LostAnswer({ children }: { children?: ReactNode }) {
+  return (
+    <div
+      role="alert"
+      className="flex flex-col items-start gap-2 self-stretch rounded-md border p-3"
+    >
+      <p>
+        We don&apos;t know whether the orders were sent: the answer was lost.
+        Check History before trying again.
+      </p>
+      <Link to="/history" className="font-medium underline">
+        Open History
+      </Link>
+      {children}
+    </div>
   );
 }
