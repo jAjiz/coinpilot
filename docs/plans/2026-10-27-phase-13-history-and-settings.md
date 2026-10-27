@@ -10,7 +10,7 @@ not seen, and a custom cadence that could not be edited.
 
 **Architecture:** Three platform changes come first, each with its tests and the
 regenerated client. Orders record the session that placed them. `GET /api/sessions`
-hides the runs that did nothing when asked to, and pages with a cursor.
+never shows a user the runs that did nothing (they stay stored for the operator), and pages with a cursor.
 `DELETE /api/proposal` takes the version it withdraws. The application then adds
 `features/history/` and `features/settings/`. Settings reuses phase 11's step forms
 through their `onSaved`. The copy for runs and orders is pure functions in
@@ -100,13 +100,16 @@ Facts that shape the screens:
 1. **`orders.session_id`**, nullable, `ON DELETE SET NULL`. Orders placed before the
    migration have none. So does an order whose session retention deleted.
    `record_attempt` takes it, and `_run` passes the evaluation's id down to `_attempt`.
-2. **`GET /api/sessions` gains `idle` and `before`.** `idle=false` leaves out
-   `NOTHING_TO_DO`. The default stays `true`, so existing callers see no change.
+2. **`GET /api/sessions` shows a user only the runs that affected them.** It never
+   returns `NOTHING_TO_DO`, and there is no parameter to ask for it. Every session is
+   still stored: the table is the operator's record of what the scheduler did, read in
+   the database, not through the user's API. Failures (`ERROR`, `KRAKEN_UNAVAILABLE`,
+   `UNRESOLVED`, `STOPPED`) are shown, because a scheduled run that failed is one the
+   user expected and did not get. The call gains `before`, a cursor.
    `before` is the `id` of the last session already shown. The page continues strictly
    after it, ordered by `(started_at, id)` descending. An unknown `before`, or one that
    belongs to another user, is a `404` "that session no longer exists".
-3. **The application hides the idle runs by default.** History has a switch, "Show runs
-   with nothing to do", off at first and not remembered. Pages are 20 long. "Load more"
+3. **History has no switch.** It lists what the API returns. Pages are 20 long. "Load more"
    shows while the last page came back full.
 4. **`GET /api/orders` gains `session`.** It takes a session id and returns that
    session's orders, oldest first: the order they were sent in. Without it, the call
@@ -161,7 +164,7 @@ Facts that shape the screens:
 |---|---|
 | `scripts/migrations/versions/<rev>_order_session.py` | `orders.session_id`, FK, index |
 | `core/db/models.py`, `core/db/orders.py`, `core/execution.py` | The order records its session |
-| `core/db/telemetry.py` | `list_evaluations` with `idle` and `before` |
+| `core/db/telemetry.py` | `list_evaluations` with `idle` and `before`; the route always passes `idle=False` |
 | `core/db/proposals.py`, `core/rebalance.py` | `withdraw` with a version |
 | `api/routes/history.py`, `api/routes/proposal.py`, `api/schemas.py` | The new parameters and fields |
 | `web/openapi.json`, `web/src/api/schema.d.ts` | Regenerated |
@@ -227,7 +230,7 @@ def test_another_users_session_lists_no_orders(...)   # tenant: user B ?session=
 
 ---
 
-### Task 2: Sessions without the idle runs, a page at a time
+### Task 2: A user's sessions are the runs that affected them, a page at a time
 
 **Files:**
 - Modify: `core/db/telemetry.py` (`list_evaluations`), `api/routes/history.py`
@@ -243,14 +246,17 @@ def list_evaluations(session, user_id, limit: int = 50, *, idle: bool = True,
     # order (started_at DESC, id DESC); idle=False drops status NOTHING_TO_DO;
     # before: rows strictly after that row in this order. Raises LookupError when
     # `before` is not one of this user's sessions.
-# GET /api/sessions?limit=&idle=&before=   404 "that session no longer exists" on LookupError
+# GET /api/sessions?limit=&before=   always idle=False; 404 "that session no longer exists" on LookupError
+# `idle` stays a DAL parameter (default True) so integration tests and the operator's
+# tooling can still read every row; it is not exposed by the route.
 ```
 
 - [ ] **Step 1: Write the failing tests.**
 
 ```python
-def test_idle_false_leaves_out_nothing_to_do(...)      # DONE, NOTHING_TO_DO, PARTIAL → DONE, PARTIAL
-def test_idle_defaults_to_every_run(...)               # no parameter → all three
+def test_the_api_never_lists_nothing_to_do(...)        # DONE, NOTHING_TO_DO, PARTIAL → DONE, PARTIAL
+def test_nothing_to_do_is_still_stored(...)            # list_evaluations(idle=True) → all three
+def test_an_idle_query_parameter_is_ignored(...)       # ?idle=true → still DONE, PARTIAL
 def test_pages_neither_repeat_nor_skip_one_instant(...)
     # five sessions, three sharing started_at; limit=2, follow `before` → all five ids once, in order
 def test_unknown_cursor_is_404(...)                    # before=<random uuid> → 404, detail exact
@@ -261,7 +267,9 @@ def test_another_users_cursor_is_404(...)              # tenant
 - [ ] **Step 3: Implement.** Compare the cursor as a row value:
   `tuple_(started_at, id) < tuple_(cursor.started_at, cursor.id)`.
 - [ ] **Step 4: Regenerate the client.** Run `pytest`, `ruff`, `npm run check:generated`.
-- [ ] **Step 5: Commit** `feat(api): sessions without the idle runs, a page at a time`
+  Existing tests that read a `NOTHING_TO_DO` row through `GET /api/sessions` change to
+  read it with `list_evaluations(idle=True)`.
+- [ ] **Step 5: Commit** `feat(api): a user's sessions are the runs that affected them`
 
 ---
 
@@ -319,7 +327,7 @@ test("dismiss sends the version on screen", ...)   // the DELETE's URL has ?vers
   `web/src/features/history/SessionRow.tsx`, `HistoryPage.test.tsx`
 - Modify: `web/src/features/history/HistoryPage.tsx`, `web/src/api/queries.ts`,
   `web/src/test/fakePlatform.ts` (`sessions: EvaluationOut[]`, `orders: OrderOut[]`,
-  honouring `idle`, `before`, `limit`, `session`)
+  never listing `NOTHING_TO_DO`; honouring `before`, `limit`, `session`)
 
 **Interfaces:**
 - Consumes: `formatRun` (`lib/summary.ts`), `formatMoney`, `legLine`
@@ -337,7 +345,7 @@ export function orderStatus(o: Pick<Order, "status" | "error">): string;
 export function orderLine(o: Order, fiat: string): string;   // legLine of side, asset, requested_fiat
 // api/queries.ts
 export const SESSIONS_PAGE = 20;
-export function useSessions(idle: boolean);       // useInfiniteQuery, key ["sessions", { idle }]
+export function useSessions();                    // useInfiniteQuery, key ["sessions"]
 export function useSessionOrders(sessionId: string, enabled: boolean); // key ["orders", sessionId]
 ```
 
@@ -353,15 +361,13 @@ export function useSessionOrders(sessionId: string, enabled: boolean); // key ["
 - **`orderStatus` copy.** `FILLED` "Filled"; `PENDING` "Result not known yet"; `FAILED`
   with an error: "Refused by Kraken: {error}"; `FAILED` without one: "Not found on
   Kraken". Any other: the status itself.
-- **The page.** Heading "History". The switch "Show runs with nothing to do" (Decision
-  3). Each row shows `formatRun(started_at)`, `runTitle` and `runStatus`. A row is a
+- **The page.** Heading "History". Each row shows `formatRun(started_at)`, `runTitle` and `runStatus`. A row is a
   button that expands it: its messages, then its orders. Each order shows `orderLine`,
   `orderStatus` and, when filled, "Cost {cost} · fee {fee}". The orders query starts only
   when the row expands. A session with no orders says "No orders are linked to this run."
   Below the list: "Load more" (Decision 3).
-- **States.** Loading: three row skeletons. Error: `LoadFailed` with retry. Empty with
-  the switch off: "No run has done anything yet. Turn on “Show runs with nothing to do”
-  to see every run." Empty with it on: "Nothing has run yet."
+- **States.** Loading: three row skeletons. Error: `LoadFailed` with retry. Empty:
+  "Nothing has happened yet. Runs that invest, rebalance or fail show here."
 - The fiat for amounts comes from `useConfig`.
 
 - [ ] **Step 1: Write the failing tests.** `history.test.ts`: every copy row above,
@@ -369,14 +375,14 @@ export function useSessionOrders(sessionId: string, enabled: boolean); // key ["
   `messagesOf("a\n\nb")` is `["a", "b"]`. `HistoryPage.test.tsx`:
 
 ```ts
-test("idle runs are hidden until asked for", ...)
-  // fakePlatform: DONE invest, NOTHING_TO_DO invest → one row; switch on → two rows
+test("there is no way to show runs that did nothing", ...)
+  // no control named /nothing to do/i on the page
 test("a run expands into its messages and its orders", ...)
   // tap the row → its log lines; "Buy BTC for €50.00", "Filled", "Cost €50.00 · fee €0.13"
 test("orders are read only when a run expands", ...)   // no GET /api/orders before the tap
 test("load more continues after the last run", ...)
   // 25 sessions → 20 rows, "Load more" → 25 rows, the button gone; the second GET has before=<20th id>
-test("no runs says why", ...)                           // both empty sentences
+test("no runs says why", ...)                           // the empty sentence
 test("a failed read offers a retry", ...)
 ```
 
@@ -634,7 +640,7 @@ test("an interval of nothing is refused before sending", ...)  // days 0 months 
 test("a cadence changed in settings moves the next run", ...)
   // Settings → "Edit automation" → invest Weekly → Monthly → save → the "Next invest" line changes
 test("history shows a run and its orders", ...)
-  // History → the invest row → its order "Filled"; the switch reveals a "Nothing to do" row
+  // History → the invest row → its order "Filled"; no "Nothing to do" row
 test("sign out lands on the sign-in page", ...)
 ```
 
@@ -649,8 +655,8 @@ test("sign out lands on the sign-in page", ...)
 The migration only adds a column, so a rollback to phase 12's image still works against
 the migrated database.
 
-1. Deploy. Open History on the phone. Your runs are listed without the idle ones. The
-   switch shows them, and "Load more" goes back further.
+1. Deploy. Open History on the phone. Only runs that did something, or failed, are
+   listed; "Load more" goes back further. The `sessions` table still holds every run.
 2. Expand an invest run that placed orders after the deploy. Its orders are listed. A
    run from before the deploy shows "No orders are linked to this run.": its orders have no session.
 3. In Settings, change the invest cadence. "Next invest" moves to the new date.
