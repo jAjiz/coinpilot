@@ -145,12 +145,42 @@ test("dismiss withdraws the proposal and goes Home", async () => {
   ).toBeInTheDocument();
   expect(router.state.location.pathname).toBe("/");
   expect(fake.requests.map((r) => [r.method, r.path])).toEqual([
-    ["DELETE", "/api/proposal"],
+    ["DELETE", "/api/proposal?version=3"],
   ]);
   await screen.findByText("Your account has not been read yet.");
   expect(
     screen.queryByRole("heading", { name: "Rebalance proposal" }),
   ).toBeNull();
+});
+
+test("dismiss sends the version on screen", async () => {
+  const user = userEvent.setup();
+  const fake = platform({ proposal: proposal({ version: 1 }) });
+  renderAt("/proposal", fake.handlers);
+  await user.click(await screen.findByRole("button", { name: "Dismiss" }));
+  await screen.findByRole("heading", { name: "Home" });
+  expect(fake.requests.map((r) => [r.method, r.path])).toEqual([
+    ["DELETE", "/api/proposal?version=1"],
+  ]);
+});
+
+test("dismissing a proposal that changed shows the new one", async () => {
+  const user = userEvent.setup();
+  const fake = platform({ proposal: proposal({ version: 1 }) });
+  renderAt("/proposal", fake.handlers);
+  await screen.findByText("Buy BTC for €50.00");
+  fake.state.proposal = proposal({
+    version: 2,
+    legs: [leg("ADA", "buy", "15", null)],
+  });
+  await user.click(screen.getByRole("button", { name: "Dismiss" }));
+  expect(
+    await screen.findByText("The proposal changed; review it again."),
+  ).toBeInTheDocument();
+  expect(screen.getByText("Buy ADA for €15.00")).toBeInTheDocument();
+  expect(screen.queryByText("Buy BTC for €50.00")).toBeNull();
+  expect(fake.state.proposal?.version).toBe(2);
+  expect(screen.getByRole("heading", { name: "Proposal" })).toBeInTheDocument();
 });
 
 test("a proposal already gone is dismissed all the same", async () => {

@@ -92,6 +92,17 @@ const DEFAULT_CONFIG = {
   rebalance_cadence_anchor: null,
 } as const;
 
+// The 409 of a version that is not the live one, with the live proposal.
+function stale(proposal: Proposal) {
+  return HttpResponse.json(
+    {
+      detail: "that is not the live version; read the proposal again",
+      proposal,
+    },
+    { status: 409 },
+  );
+}
+
 // Every order of the proposal (a leg without a note), filled as asked.
 function filled(proposal: Proposal): RebalanceOut {
   const legs = proposal.legs
@@ -266,8 +277,12 @@ export function fakePlatform(initial: Partial<FakeState> = {}): {
     ),
     http.delete("/api/proposal", async ({ request }) => {
       await record(request);
+      const version = Number(new URL(request.url).searchParams.get("version"));
       if (state.proposal === null) {
         return detail(404, "there is no live proposal");
+      }
+      if (version !== state.proposal.version) {
+        return stale(state.proposal);
       }
       state.proposal = null;
       return new HttpResponse(null, { status: 204 });
@@ -279,13 +294,7 @@ export function fakePlatform(initial: Partial<FakeState> = {}): {
         return detail(404, "there is no live proposal");
       }
       if (body.version !== state.proposal.version) {
-        return HttpResponse.json(
-          {
-            detail: "that is not the live version; read the proposal again",
-            proposal: state.proposal,
-          },
-          { status: 409 },
-        );
+        return stale(state.proposal);
       }
       const result = state.approveResult ?? filled(state.proposal);
       state.proposal = null;

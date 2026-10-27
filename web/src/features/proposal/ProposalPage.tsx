@@ -73,9 +73,11 @@ export function ProposalPage() {
   const approved = useRef(false);
 
   const dismiss = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (version: number) => {
       try {
-        await unwrap(api.DELETE("/api/proposal"));
+        await unwrap(
+          api.DELETE("/api/proposal", { params: { query: { version } } }),
+        );
       } catch (error) {
         // Already gone is the outcome that was asked for.
         if (!(error instanceof ApiError && error.status === 404)) throw error;
@@ -84,6 +86,15 @@ export function ProposalPage() {
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: proposalKey });
       if (!approved.current) void navigate("/");
+    },
+    // The same answer as an approval's: the live proposal, to be read again.
+    onError: (error) => {
+      const changed = superseded(error);
+      if (changed !== null) {
+        client.setQueryData(proposalKey, changed.proposal);
+        setConfirming(null);
+        setNotice(changed.messages);
+      }
     },
   });
 
@@ -144,9 +155,9 @@ export function ProposalPage() {
     approve.mutate({ version, fiat });
   }
 
-  function withdraw() {
+  function withdraw(version: number) {
     setNotice(null);
-    dismiss.mutate();
+    dismiss.mutate(version);
   }
 
   const heading: ReactNode = (
@@ -230,6 +241,12 @@ export function ProposalPage() {
       ? operationError(approve.error)
       : null;
 
+  // A 409 with a proposal is answered by the page itself.
+  const dismissError =
+    dismiss.isError && superseded(dismiss.error) === null
+      ? operationError(dismiss.error)
+      : null;
+
   return (
     <div className="flex flex-col gap-6">
       {heading}
@@ -305,12 +322,10 @@ export function ProposalPage() {
       )}
 
       <section className="flex flex-col items-start gap-3">
-        <FormError
-          message={dismiss.isError ? operationError(dismiss.error) : null}
-        />
+        <FormError message={dismissError} />
         <Button
           variant="outline"
-          onClick={withdraw}
+          onClick={() => withdraw(data.version)}
           disabled={
             confirming !== null ||
             dismiss.isPending ||

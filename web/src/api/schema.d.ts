@@ -1262,7 +1262,9 @@ export interface operations {
     };
     withdraw_proposal_api_proposal_delete: {
         parameters: {
-            query?: never;
+            query: {
+                version: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1275,6 +1277,15 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };
