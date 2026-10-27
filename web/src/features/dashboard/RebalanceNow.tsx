@@ -2,6 +2,8 @@ import { useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router";
 import { api, operationError, unwrap } from "@/api/client";
+import { historyChanged } from "@/api/operations";
+import { sessionGuard } from "@/api/signOut";
 import { portfolioKey, proposalKey } from "@/api/queries";
 import { FormError } from "@/components/FormError";
 import { Button } from "@/components/ui/button";
@@ -17,7 +19,9 @@ export function RebalanceNow() {
 
   const rebalance = useMutation({
     mutationFn: () => unwrap(api.POST("/api/rebalance")),
-    onSuccess: async (result) => {
+    onMutate: () => sessionGuard(client),
+    onSuccess: async (result, _, stillSame) => {
+      if (!stillSame()) return;
       // Every evaluation keeps a snapshot: the portfolio has a newer reading.
       void client.invalidateQueries({ queryKey: portfolioKey });
       if (result.status === "PROPOSED" && result.proposal) {
@@ -29,8 +33,10 @@ export function RebalanceNow() {
       // An evaluation that finds nothing may have withdrawn a proposal.
       await client.invalidateQueries({ queryKey: proposalKey });
     },
-    onSettled: () => {
+    onSettled: (_data, _error, _vars, stillSame) => {
       sending.current = false;
+      // A proposal is a session too: History reads it again.
+      if (stillSame?.()) historyChanged(client);
     },
   });
 

@@ -35,6 +35,27 @@ function untouched(config: Config): boolean {
   );
 }
 
+// The stored configuration as it is: what Settings shows. A rebalance cadence
+// at MIN, which only the API can set, is "Custom".
+function storedValues(config: Config, today: string): AutomationValues {
+  return {
+    invest: readInvest(cadenceOf(config, "invest"), today),
+    rebalance: readRebalance(cadenceOf(config, "rebalance")),
+    invest_cash_enabled: config.invest_cash_enabled,
+    cash_rebalance_enabled: config.cash_rebalance_enabled,
+    auto_rebalance_enabled: config.auto_rebalance_enabled,
+    min_drift_pct: config.min_drift_pct,
+    min_order_fiat: config.min_order_fiat,
+  };
+}
+
+export function settingsValues(
+  config: Config,
+  today: string,
+): AutomationValues {
+  return storedValues(config, today);
+}
+
 export function wizardValues(config: Config, today: string): AutomationValues {
   if (untouched(config)) {
     return {
@@ -47,16 +68,11 @@ export function wizardValues(config: Config, today: string): AutomationValues {
       min_order_fiat: "0",
     };
   }
-  return {
-    invest: readInvest(cadenceOf(config, "invest"), today),
-    rebalance:
-      config.rebalance_cadence_mode === "MIN"
-        ? { kind: "choice", choice: "quarterly", date: today }
-        : readRebalance(cadenceOf(config, "rebalance")),
-    invest_cash_enabled: config.invest_cash_enabled,
-    cash_rebalance_enabled: config.cash_rebalance_enabled,
-    auto_rebalance_enabled: config.auto_rebalance_enabled,
-    min_drift_pct: config.min_drift_pct,
-    min_order_fiat: config.min_order_fiat,
-  };
+  const stored = storedValues(config, today);
+  return config.rebalance_cadence_mode === "MIN"
+    ? {
+        ...stored,
+        rebalance: { kind: "choice", choice: "quarterly", date: today },
+      }
+    : stored;
 }

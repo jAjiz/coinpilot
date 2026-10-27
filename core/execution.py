@@ -382,7 +382,9 @@ def _run(
     blocked: list[bool] = []
     status = EvaluationStatus.ERROR
     try:
-        status = _evaluate(context, user_id, account, private, reason, decide, log, legs, blocked)
+        status = _evaluate(
+            context, user_id, evaluation_id, account, private, reason, decide, log, legs, blocked
+        )
     except PortfolioUnavailable as exc:
         status = EvaluationStatus.KRAKEN_UNAVAILABLE
         log.append(f"kraken did not return {exc}; nothing was sent")
@@ -397,6 +399,7 @@ def _run(
 def _evaluate(
     context: ExecutionContext,
     user_id: uuid.UUID,
+    evaluation_id: uuid.UUID,
     account: _Account,
     private,
     reason: OrderReason,
@@ -429,7 +432,9 @@ def _evaluate(
         return verdict
 
     pin = _Pin(context, user_id, snapshot_id)
-    stopped = _send_all(context, user_id, private, planned, reason, account.fiat, log, legs, pin)
+    stopped = _send_all(
+        context, user_id, evaluation_id, private, planned, reason, account.fiat, log, legs, pin
+    )
     if stopped:
         return EvaluationStatus.STOPPED
     if any(leg.status is LegStatus.FAILED for leg in legs):
@@ -445,6 +450,7 @@ def _evaluate(
 def _send_all(
     context: ExecutionContext,
     user_id: uuid.UUID,
+    evaluation_id: uuid.UUID,
     private,
     planned: Planned,
     reason: OrderReason,
@@ -463,7 +469,7 @@ def _send_all(
     for leg in planned.legs:
         if leg.side is not Side.SELL:
             continue
-        result, stopped = _attempt(context, user_id, private, leg, reason, stopped, pin)
+        result, stopped = _attempt(context, user_id, evaluation_id, private, leg, reason, stopped, pin)
         legs.append(result)
         log.append(_describe(result, fiat))
         if result.status is LegStatus.FILLED:
@@ -473,7 +479,7 @@ def _send_all(
 
     buys = [leg for leg in planned.legs if leg.side is Side.BUY]
     for leg in _within(buys, budget, fiat):
-        result, stopped = _attempt(context, user_id, private, leg, reason, stopped, pin)
+        result, stopped = _attempt(context, user_id, evaluation_id, private, leg, reason, stopped, pin)
         legs.append(result)
         log.append(_describe(result, fiat))
     return stopped
@@ -509,6 +515,7 @@ def _within(buys: list[PlannedLeg], budget: Decimal, fiat: str) -> list[PlannedL
 def _attempt(
     context: ExecutionContext,
     user_id: uuid.UUID,
+    evaluation_id: uuid.UUID,
     private,
     leg: PlannedLeg,
     reason: OrderReason,
@@ -521,7 +528,7 @@ def _attempt(
     if stopped:
         return _skipped(leg, "not sent: an earlier order's answer is unknown"), True
     pin()
-    result = _send(context, user_id, private, leg, reason)
+    result = _send(context, user_id, evaluation_id, private, leg, reason)
     # An unknown answer leaves no txid. The balance is ambiguous until resolved.
     return result, result.status is LegStatus.PENDING and result.txid is None
 
@@ -534,7 +541,12 @@ def _place(private, leg: PlannedLeg, cl_ord_id: str, *, validate: bool = False) 
 
 
 def _send(
-    context: ExecutionContext, user_id: uuid.UUID, private, leg: PlannedLeg, reason: OrderReason
+    context: ExecutionContext,
+    user_id: uuid.UUID,
+    evaluation_id: uuid.UUID,
+    private,
+    leg: PlannedLeg,
+    reason: OrderReason,
 ) -> LegResult:
     cl_ord_id = new_cl_ord_id()
     with context.sessions() as session:
@@ -548,6 +560,7 @@ def _send(
             reason=reason,
             requested_fiat=leg.amount,
             attempted_at=context.now(),
+            session_id=evaluation_id,
         )
     # Committed. From here a lost answer leaves a row to resolve, not a gap (spec §9.2).
     placement = _place(private, leg, cl_ord_id)

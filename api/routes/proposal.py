@@ -6,7 +6,9 @@ the version the user read.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Response
+from typing import Annotated
+
+from fastapi import APIRouter, HTTPException, Query, Response
 from fastapi.responses import JSONResponse
 
 from api.deps import Ctx, CurrentUser
@@ -27,6 +29,7 @@ from core.rebalance import (
 router = APIRouter(tags=["proposal"])
 
 NO_PROPOSAL = "there is no live proposal"
+STALE_VERSION = "that is not the live version; read the proposal again"
 
 
 def _proposal(state: ProposalState | None) -> ProposalOut | None:
@@ -82,9 +85,7 @@ def approve_proposal(body: ApproveIn, user: CurrentUser, context: Ctx) -> Rebala
     except NoProposal:
         raise HTTPException(404, NO_PROPOSAL) from None
     except StaleVersion as exc:
-        return refusal(
-            409, "that is not the live version; read the proposal again", proposal=_proposal_json(exc.current)
-        )
+        return refusal(409, STALE_VERSION, proposal=_proposal_json(exc.current))
 
     refused = unfinished(result.evaluation)
     if refused is not None:
@@ -101,7 +102,11 @@ def approve_proposal(body: ApproveIn, user: CurrentUser, context: Ctx) -> Rebala
 
 
 @router.delete("/proposal", status_code=204)
-def withdraw_proposal(user: CurrentUser, context: Ctx) -> Response:
-    if not withdraw(context, user.id):
+def withdraw_proposal(version: Annotated[int, Query(ge=1)], user: CurrentUser, context: Ctx) -> Response:
+    try:
+        withdrawn = withdraw(context, user.id, version)
+    except StaleVersion as exc:
+        return refusal(409, STALE_VERSION, proposal=_proposal_json(exc.current))
+    if not withdrawn:
         raise HTTPException(404, NO_PROPOSAL)
     return Response(status_code=204)

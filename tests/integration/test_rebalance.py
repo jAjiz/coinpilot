@@ -111,20 +111,30 @@ def test_a_proposal_is_withdrawn_when_the_drift_is_gone(app_context, db_session,
 
 def test_a_proposal_after_a_withdrawn_one_takes_the_next_version(app_context, user):
     propose(app_context, user.id)
-    withdraw(app_context, user.id)
+    withdraw(app_context, user.id, 1)
 
     again = propose(app_context, user.id)
 
     assert again.proposal.version == 2
 
 
-def test_withdrawing_says_whether_there_was_a_live_proposal(app_context, user):
-    assert withdraw(app_context, user.id) is False
+def test_withdraw_with_the_live_version_withdraws(app_context, user):
+    assert withdraw(app_context, user.id, 1) is False
     propose(app_context, user.id)
 
-    assert withdraw(app_context, user.id) is True
+    assert withdraw(app_context, user.id, 1) is True
     assert current(app_context, user.id) is None
-    assert withdraw(app_context, user.id) is False
+    assert withdraw(app_context, user.id, 1) is False
+
+
+def test_withdraw_with_an_old_version_is_stale_and_keeps_it(app_context, user):
+    propose(app_context, user.id)
+
+    with pytest.raises(StaleVersion) as stale:
+        withdraw(app_context, user.id, 7)
+
+    assert stale.value.current.version == 1
+    assert current(app_context, user.id).version == 1
 
 
 def test_approving_the_live_version_executes_it(app_context, db_session, fake_kraken, user):

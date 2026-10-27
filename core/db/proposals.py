@@ -18,9 +18,15 @@ from core.db.models import Proposal
 from core.db.types import ProposalStatus, ProposalTrigger
 
 
-def get_proposal(session: Session, user_id: uuid.UUID) -> Proposal | None:
-    """Whatever is in this user's slot, whatever its status."""
+def get_proposal(session: Session, user_id: uuid.UUID, *, for_update: bool = False) -> Proposal | None:
+    """Whatever is in this user's slot, whatever its status.
+
+    `for_update` locks the row until the transaction ends, for a check that must still
+    hold when the write follows.
+    """
     stmt = select(Proposal).where(Proposal.user_id == user_id)
+    if for_update:
+        stmt = stmt.with_for_update()
     return session.execute(stmt).scalar_one_or_none()
 
 

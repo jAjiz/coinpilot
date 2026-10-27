@@ -643,9 +643,31 @@
         ],
         "summary": "Withdraw Proposal",
         "operationId": "withdraw_proposal_api_proposal_delete",
+        "parameters": [
+          {
+            "name": "version",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Version"
+            }
+          }
+        ],
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
           }
         }
       }
@@ -710,6 +732,23 @@
               "default": 50,
               "title": "Limit"
             }
+          },
+          {
+            "name": "session",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Session"
+            }
           }
         ],
         "responses": {
@@ -746,6 +785,7 @@
           "history"
         ],
         "summary": "Sessions",
+        "description": "The runs that affected the user, newest first. Runs that found nothing to do stay stored, unlisted.",
         "operationId": "sessions_api_sessions_get",
         "parameters": [
           {
@@ -758,6 +798,23 @@
               "minimum": 1,
               "default": 50,
               "title": "Limit"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before"
             }
           }
         ],
@@ -1326,6 +1383,11 @@
       },
       "EvaluationOut": {
         "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
           "started_at": {
             "type": "string",
             "format": "date-time",
@@ -1394,6 +1456,7 @@
         },
         "type": "object",
         "required": [
+          "id",
           "started_at",
           "finished_at",
           "duration_ms",
@@ -1768,6 +1831,18 @@
             "type": "string",
             "title": "Cl Ord Id"
           },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
           "txid": {
             "anyOf": [
               {
@@ -1867,6 +1942,7 @@
         "type": "object",
         "required": [
           "cl_ord_id",
+          "session_id",
           "txid",
           "pair",
           "asset",

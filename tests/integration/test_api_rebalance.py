@@ -27,7 +27,7 @@ def test_rebalancing_needs_a_signed_in_user(api):
     assert api.post("/api/rebalance").status_code == 401
     assert api.get("/api/proposal").status_code == 401
     assert api.post("/api/proposal/approve", json={"version": 1}).status_code == 401
-    assert api.delete("/api/proposal").status_code == 401
+    assert api.delete("/api/proposal?version=1").status_code == 401
 
 
 def test_rebalancing_needs_settings_first(api, make_user, login):
@@ -135,9 +135,29 @@ def test_an_approval_names_its_version(api, headers):
 def test_a_proposal_can_be_withdrawn(api, headers):
     api.post("/api/rebalance", headers=headers)
 
-    assert api.delete("/api/proposal", headers=headers).status_code == 204
+    assert api.delete("/api/proposal?version=1", headers=headers).status_code == 204
     assert api.get("/api/proposal", headers=headers).status_code == 404
-    assert api.delete("/api/proposal", headers=headers).status_code == 404
+    assert api.delete("/api/proposal?version=1", headers=headers).status_code == 404
+
+
+def test_withdraw_with_an_old_version_is_409_and_keeps_it(api, headers):
+    api.post("/api/rebalance", headers=headers)
+
+    response = api.delete("/api/proposal?version=7", headers=headers)
+
+    assert response.status_code == 409
+    body = response.json()
+    assert body["detail"] == "that is not the live version; read the proposal again"
+    assert body["proposal"]["version"] == 1
+    assert api.get("/api/proposal", headers=headers).status_code == 200
+
+
+def test_withdraw_without_a_version_is_422(api, headers):
+    api.post("/api/rebalance", headers=headers)
+
+    assert api.delete("/api/proposal", headers=headers).status_code == 422
+    assert api.delete("/api/proposal?version=0", headers=headers).status_code == 422
+    assert api.get("/api/proposal", headers=headers).status_code == 200
 
 
 def test_a_rebalance_already_running_is_a_409(api, headers, user_locks):

@@ -1,7 +1,7 @@
 import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { proposalKey, type Config, type Proposal } from "@/api/queries";
 import { createQueryClient } from "@/providers";
 import { fakePlatform, type FakeState } from "@/test/fakePlatform";
@@ -145,12 +145,42 @@ test("dismiss withdraws the proposal and goes Home", async () => {
   ).toBeInTheDocument();
   expect(router.state.location.pathname).toBe("/");
   expect(fake.requests.map((r) => [r.method, r.path])).toEqual([
-    ["DELETE", "/api/proposal"],
+    ["DELETE", "/api/proposal?version=3"],
   ]);
   await screen.findByText("Your account has not been read yet.");
   expect(
     screen.queryByRole("heading", { name: "Rebalance proposal" }),
   ).toBeNull();
+});
+
+test("dismiss sends the version on screen", async () => {
+  const user = userEvent.setup();
+  const fake = platform({ proposal: proposal({ version: 1 }) });
+  renderAt("/proposal", fake.handlers);
+  await user.click(await screen.findByRole("button", { name: "Dismiss" }));
+  await screen.findByRole("heading", { name: "Home" });
+  expect(fake.requests.map((r) => [r.method, r.path])).toEqual([
+    ["DELETE", "/api/proposal?version=1"],
+  ]);
+});
+
+test("dismissing a proposal that changed shows the new one", async () => {
+  const user = userEvent.setup();
+  const fake = platform({ proposal: proposal({ version: 1 }) });
+  renderAt("/proposal", fake.handlers);
+  await screen.findByText("Buy BTC for €50.00");
+  fake.state.proposal = proposal({
+    version: 2,
+    legs: [leg("ADA", "buy", "15", null)],
+  });
+  await user.click(screen.getByRole("button", { name: "Dismiss" }));
+  expect(
+    await screen.findByText("The proposal changed; review it again."),
+  ).toBeInTheDocument();
+  expect(screen.getByText("Buy ADA for €15.00")).toBeInTheDocument();
+  expect(screen.queryByText("Buy BTC for €50.00")).toBeNull();
+  expect(fake.state.proposal?.version).toBe(2);
+  expect(screen.getByRole("heading", { name: "Proposal" })).toBeInTheDocument();
 });
 
 test("a proposal already gone is dismissed all the same", async () => {
@@ -579,4 +609,183 @@ test("a proposal withdrawn under an open confirmation closes it", async () => {
   expect(
     screen.getByText("The proposal changed; review it again."),
   ).toBeInTheDocument();
+});
+
+const refreshes = (fake: ReturnType<typeof platform>) =>
+  fake.requests.filter((r) => r.path === "/api/portfolio/refresh").length;
+
+test("leaving while the approval is in flight keeps its outcome", async () => {
+  const user = userEvent.setup();
+  const fake = platform();
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const router = renderAt("/proposal", [
+    http.post("/api/proposal/approve", async () => {
+      await gate;
+      fake.state.proposal = null;
+      return HttpResponse.json({
+        status: "DONE",
+        legs: [
+          sent("BTC", "buy", "50", "FILLED"),
+          sent("ETH", "sell", "20.5", "FILLED"),
+        ],
+        proposal: null,
+        messages: [],
+      });
+    }),
+    ...fake.handlers,
+  ]);
+  await user.click(await approveButton());
+  await user.click(await screen.findByRole("button", { name: "Confirm" }));
+  await act(() => router.navigate("/history"));
+  await screen.findByRole("heading", { name: "History" });
+
+  // Back while it is still in flight: the pending button.
+  await act(() => router.navigate("/proposal"));
+  expect(
+    await screen.findByRole("button", { name: "Sending…" }),
+  ).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Dismiss" })).toBeDisabled();
+
+  await act(() => router.navigate("/"));
+  await screen.findByRole("heading", { name: "Home" });
+  release();
+  await waitFor(() => expect(refreshes(fake)).toBe(1));
+
+  await act(() => router.navigate("/proposal"));
+  expect(
+    await screen.findByText("Every order was filled."),
+  ).toBeInTheDocument();
+  expect(screen.getAllByText("Filled")).toHaveLength(2);
+  expect(refreshes(fake)).toBe(1);
+
+  // Leaving by the link closes it.
+  await user.click(screen.getByRole("link", { name: "Back to Home" }));
+  await screen.findByRole("heading", { name: "Home" });
+  await act(() => router.navigate("/proposal"));
+  expect(
+    await screen.findByText("There is no proposal to review."),
+  ).toBeInTheDocument();
+});
+
+test("a lost answer after approve sends you to History", async () => {
+  const user = userEvent.setup();
+  const fake = platform();
+  const router = renderAt("/proposal", [
+    http.post("/api/proposal/approve", () =>
+      HttpResponse.json({ detail: "bad gateway" }, { status: 502 }),
+    ),
+    ...fake.handlers,
+  ]);
+  await user.click(await approveButton());
+  await user.click(await screen.findByRole("button", { name: "Confirm" }));
+  expect(
+    await screen.findByText(
+      "We don't know whether the orders were sent: the answer was lost. Check History before trying again.",
+    ),
+  ).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Open History" })).toHaveAttribute(
+    "href",
+    "/history",
+  );
+  expect(screen.getByRole("button", { name: "Confirm" })).toBeDisabled();
+  expect(screen.queryByText("bad gateway")).toBeNull();
+
+  await act(() => router.navigate("/history"));
+  await screen.findByRole("heading", { name: "History" });
+  await act(() => router.navigate("/proposal"));
+  expect(await screen.findByText(/the answer was lost/)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Confirm" })).toBeDisabled();
+
+  await user.click(screen.getByRole("button", { name: "Close" }));
+  expect(screen.queryByText(/the answer was lost/)).toBeNull();
+  expect(await approveButton()).toBeEnabled();
+});
+
+test("an approval held past the default gcTime is still shown", async () => {
+  const user = userEvent.setup();
+  const fake = platform();
+  const router = renderAt("/proposal", fake.handlers);
+  await user.click(await approveButton());
+  await user.click(await screen.findByRole("button", { name: "Confirm" }));
+  await screen.findByText("Every order was filled.");
+  await waitFor(() =>
+    expect(fake.requests.map((r) => r.path)).toContain(
+      "/api/portfolio/refresh",
+    ),
+  );
+
+  // Leaving schedules the collection of a mutation nobody observes.
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    await act(() => router.navigate("/history"));
+    vi.advanceTimersByTime(10 * 60 * 1000);
+  } finally {
+    vi.useRealTimers();
+  }
+  await act(() => router.navigate("/proposal"));
+
+  expect(
+    await screen.findByText("Every order was filled."),
+  ).toBeInTheDocument();
+});
+
+test("an approval that sent nothing does not show an earlier invest's failed refresh", async () => {
+  const user = userEvent.setup();
+  const filledLeg = {
+    ...leg("BTC", "buy", "60", null),
+    status: "FILLED",
+    cl_ord_id: null,
+    txid: null,
+    cost: null,
+    executed_volume: null,
+    executed_price: null,
+    fee: null,
+    error: null,
+    volume: null,
+  };
+  const fake = platform({
+    investPreview: {
+      status: "PREVIEW",
+      preview: true,
+      legs: [{ ...filledLeg, status: "VALIDATED" }],
+      messages: [],
+    },
+    investResult: {
+      status: "DONE",
+      preview: false,
+      legs: [filledLeg],
+      messages: [],
+    },
+    approveResult: {
+      status: "ERROR",
+      legs: [
+        { ...filledLeg, status: "FAILED", error: "EOrder:Insufficient funds" },
+      ],
+      proposal: null,
+      messages: [],
+    },
+  });
+  const router = renderAt("/", [
+    http.post("/api/portfolio/refresh", () =>
+      HttpResponse.json({ detail: "down" }, { status: 503 }),
+    ),
+    ...fake.handlers,
+  ]);
+  await user.click(await screen.findByRole("button", { name: "Invest now" }));
+  await user.click(
+    await screen.findByRole("button", { name: "Confirm: invest €60.00" }),
+  );
+  await screen.findByText(/The new balances could not be read/);
+
+  await act(() => router.navigate("/proposal"));
+  await user.click(await approveButton());
+  await user.click(await screen.findByRole("button", { name: "Confirm" }));
+
+  expect(
+    await screen.findByText("The operation failed. Nothing more was sent."),
+  ).toBeInTheDocument();
+  expect(screen.queryByText(/The new balances could not be read/)).toBeNull();
 });

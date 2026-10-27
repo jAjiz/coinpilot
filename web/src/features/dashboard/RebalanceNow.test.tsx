@@ -4,6 +4,7 @@ import { http, HttpResponse } from "msw";
 import { afterEach, expect, test } from "vitest";
 import type { components } from "@/api/schema";
 import type { Config, Proposal } from "@/api/queries";
+import { createQueryClient } from "@/providers";
 import { fakePlatform, type FakeState } from "@/test/fakePlatform";
 import { renderAt } from "@/test/render";
 
@@ -203,4 +204,23 @@ test("a rebalance found reads the portfolio again", async () => {
   await user.click(button);
   await screen.findByText("Buy BTC for €50.00");
   await waitFor(() => expect(counter.reads).toBe(2));
+});
+
+test.each([
+  ["nothing to rebalance", platform, "Nothing to rebalance."],
+  [
+    "a rebalance found",
+    () => platform({ rebalanceResult: proposed() }),
+    "Buy BTC for €50.00",
+  ],
+])("%s marks History to be read again", async (_, make, shown) => {
+  const user = userEvent.setup();
+  const client = createQueryClient();
+  client.setQueryData(["sessions"], { pages: [[]], pageParams: [null] });
+  renderAt("/", make().handlers, client);
+  await user.click(await openButton());
+  await screen.findByText(shown);
+  await waitFor(() =>
+    expect(client.getQueryState(["sessions"])?.isInvalidated).toBe(true),
+  );
 });

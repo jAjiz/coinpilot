@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { fakePlatform } from "./fakePlatform";
 import { server } from "./server";
 
@@ -131,4 +131,81 @@ test("a refresh becomes the snapshot that GET /api/portfolio returns", async () 
     status: 200,
     body: refreshed.body,
   });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+test("lifting a pause moves both next runs to the first slot after now", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-10-27T08:00:00Z"));
+  const p = fakePlatform({
+    config: {
+      fiat: "EUR",
+      paused: true,
+      invest_cash_enabled: true,
+      rebalance_cadence_mode: "INTERVAL",
+      rebalance_interval_days: 7,
+      rebalance_interval_months: null,
+      rebalance_cadence_anchor: "2026-10-01T11:00:00Z",
+    } as never,
+    // Both fell behind while paused.
+    nextInvestAt: "2026-10-20T11:20:00Z",
+    nextRebalanceAt: "2026-10-22T11:00:00Z",
+  });
+
+  const { body } = await call(p, "PATCH", "/api/config", { paused: false });
+
+  expect(body.next_invest_at).toBe("2026-10-27T11:20:00.000Z");
+  expect(body.next_rebalance_at).toBe("2026-10-29T11:00:00.000Z");
+});
+
+test("a run still ahead is left where it is by a change that reschedules", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-10-27T08:00:00Z"));
+  const p = fakePlatform({
+    config: { fiat: "EUR", paused: false, invest_cash_enabled: true } as never,
+    nextInvestAt: "2026-10-30T11:20:00Z",
+  });
+
+  const { body } = await call(p, "PATCH", "/api/config", { paused: true });
+
+  expect(body.next_invest_at).toBe("2026-10-30T11:20:00Z");
+});
+
+test("dismissing the proposal without a version is a 422", async () => {
+  const p = fakePlatform({
+    proposal: { version: 3 } as never,
+  });
+
+  const { status } = await call(p, "DELETE", "/api/proposal");
+
+  expect(status).toBe(422);
+  expect(p.state.proposal).not.toBeNull();
+});
+
+test("orders without a session are newest first, a session's oldest first", async () => {
+  const order = (id: string, created_at: string, session_id: string) =>
+    ({ cl_ord_id: id, created_at, session_id }) as never;
+  const p = fakePlatform({
+    orders: [
+      order("a", "2026-10-20T10:00:00Z", "s1"),
+      order("b", "2026-10-21T10:00:00Z", "s1"),
+      order("c", "2026-10-22T10:00:00Z", "s2"),
+    ],
+  });
+
+  const all = await call(p, "GET", "/api/orders");
+  const one = await call(p, "GET", "/api/orders?session=s1");
+
+  expect(all.body.map((o: { cl_ord_id: string }) => o.cl_ord_id)).toEqual([
+    "c",
+    "b",
+    "a",
+  ]);
+  expect(one.body.map((o: { cl_ord_id: string }) => o.cl_ord_id)).toEqual([
+    "a",
+    "b",
+  ]);
 });

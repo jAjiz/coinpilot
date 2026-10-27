@@ -1,7 +1,7 @@
 import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import type { components } from "@/api/schema";
 import type { Config } from "@/api/queries";
 import { fakePlatform, type FakeState } from "@/test/fakePlatform";
@@ -404,4 +404,151 @@ test("a failed refresh is not shown under a later outcome", async () => {
     await screen.findByText("The operation failed. Nothing more was sent."),
   ).toBeInTheDocument();
   expect(screen.queryByText(/The new balances could not be read/)).toBeNull();
+});
+
+function gatedInvest(fake: ReturnType<typeof platform>) {
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const handler = http.post("/api/invest", async ({ request }) => {
+    if (new URL(request.url).searchParams.get("preview") === "true") {
+      return HttpResponse.json(fake.state.investPreview);
+    }
+    await gate;
+    return HttpResponse.json(fake.state.investResult);
+  });
+  return { handler, release: () => release() };
+}
+
+const refreshes = (fake: ReturnType<typeof platform>) =>
+  fake.requests.filter((r) => r.path === "/api/portfolio/refresh").length;
+
+test("leaving while the invest is in flight keeps its outcome", async () => {
+  const user = userEvent.setup();
+  const fake = platform({
+    investPreview: out("PREVIEW", accepted(), true),
+    investResult: out(
+      "DONE",
+      [leg("BTC", "60", "FILLED"), leg("ETH", "40", "FILLED")],
+      false,
+    ),
+  });
+  const invest = gatedInvest(fake);
+  const router = renderAt("/", [invest.handler, ...fake.handlers]);
+  await user.click(await openButton());
+  await user.click(
+    await screen.findByRole("button", { name: "Confirm: invest €100.00" }),
+  );
+  await act(() => router.navigate("/history"));
+  await screen.findByRole("heading", { name: "History" });
+
+  // Back while it is still in flight: the pending button, not a new preview.
+  await act(() => router.navigate("/"));
+  expect(
+    await screen.findByRole("button", { name: "Investing…" }),
+  ).toBeDisabled();
+
+  await act(() => router.navigate("/history"));
+  await screen.findByRole("heading", { name: "History" });
+  invest.release();
+  await waitFor(() => expect(refreshes(fake)).toBe(1));
+
+  await act(() => router.navigate("/"));
+  expect(
+    await screen.findByText("Every order was filled."),
+  ).toBeInTheDocument();
+  expect(screen.getAllByText("Filled")).toHaveLength(2);
+  expect(refreshes(fake)).toBe(1);
+});
+
+test("a lost answer after confirm sends you to History", async () => {
+  const user = userEvent.setup();
+  const fake = platform({ investPreview: out("PREVIEW", accepted(), true) });
+  const router = renderAt("/", [
+    http.post("/api/invest", ({ request }) =>
+      new URL(request.url).searchParams.get("preview") === "true"
+        ? HttpResponse.json(fake.state.investPreview)
+        : HttpResponse.error(),
+    ),
+    ...fake.handlers,
+  ]);
+  await user.click(await openButton());
+  await user.click(
+    await screen.findByRole("button", { name: "Confirm: invest €100.00" }),
+  );
+  expect(
+    await screen.findByText(
+      "We don't know whether the orders were sent: the answer was lost. Check History before trying again.",
+    ),
+  ).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Open History" })).toHaveAttribute(
+    "href",
+    "/history",
+  );
+  expect(
+    screen.getByRole("button", { name: "Confirm: invest €100.00" }),
+  ).toBeDisabled();
+  expect(screen.queryByText("The connection failed.")).toBeNull();
+
+  await user.click(screen.getByRole("link", { name: "Open History" }));
+  await screen.findByRole("heading", { name: "History" });
+  await act(() => router.navigate("/"));
+  expect(await screen.findByText(/the answer was lost/)).toBeInTheDocument();
+  expect(
+    screen.getByRole("button", { name: "Confirm: invest €100.00" }),
+  ).toBeDisabled();
+
+  await user.click(screen.getByRole("button", { name: "Close" }));
+  expect(await openButton()).toBeEnabled();
+  expect(screen.queryByText(/the answer was lost/)).toBeNull();
+});
+
+test("closing an outcome forgets it", async () => {
+  const user = userEvent.setup();
+  const fake = platform({
+    investPreview: out("PREVIEW", accepted(), true),
+    investResult: out("DONE", [leg("BTC", "60", "FILLED")], false),
+  });
+  const router = renderAt("/", fake.handlers);
+  await user.click(await openButton());
+  await user.click(
+    await screen.findByRole("button", { name: "Confirm: invest €100.00" }),
+  );
+  await screen.findByText("Every order was filled.");
+  await user.click(screen.getByRole("button", { name: "Close" }));
+  await act(() => router.navigate("/history"));
+  await screen.findByRole("heading", { name: "History" });
+  await act(() => router.navigate("/"));
+  expect(await openButton()).toBeEnabled();
+  expect(screen.queryByText("Every order was filled.")).toBeNull();
+});
+
+test("an outcome held past the default gcTime is still shown", async () => {
+  const user = userEvent.setup();
+  const fake = platform({
+    investPreview: out("PREVIEW", accepted(), true),
+    investResult: out("DONE", [leg("BTC", "60", "FILLED")], false),
+  });
+  const router = renderAt("/", fake.handlers);
+  await user.click(await openButton());
+  await user.click(
+    await screen.findByRole("button", { name: "Confirm: invest €100.00" }),
+  );
+  await screen.findByText("Every order was filled.");
+  await waitFor(() => expect(refreshes(fake)).toBe(1));
+
+  // Leaving schedules the collection of a mutation nobody observes.
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    await act(() => router.navigate("/history"));
+    vi.advanceTimersByTime(10 * 60 * 1000);
+  } finally {
+    vi.useRealTimers();
+  }
+  await act(() => router.navigate("/"));
+
+  expect(
+    await screen.findByText("Every order was filled."),
+  ).toBeInTheDocument();
 });

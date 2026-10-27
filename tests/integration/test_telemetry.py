@@ -2,6 +2,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
+import pytest
 from sqlalchemy import event, update
 from sqlalchemy.orm import Session
 
@@ -223,3 +224,50 @@ def test_an_evaluation_records_what_it_was_for_and_who_started_it(db_session: Se
     )
 
     assert (record.operation, record.trigger) == ("INVEST", "SCHEDULER")
+
+
+def _finished(session: Session, user_id, started_at: datetime, status: str):
+    record = start_evaluation(session, user_id, started_at=started_at)
+    return finish_evaluation(session, record.id, status=status, finished_at=started_at + timedelta(seconds=1))
+
+
+def test_nothing_to_do_is_still_stored(db_session: Session, make_user):
+    user = make_user()
+    for n, status in enumerate(["DONE", "NOTHING_TO_DO", "PARTIAL"]):
+        _finished(db_session, user.id, NOW - timedelta(hours=n), status)
+
+    assert {e.status for e in list_evaluations(db_session, user.id, idle=True)} == {
+        "DONE",
+        "NOTHING_TO_DO",
+        "PARTIAL",
+    }
+    assert {e.status for e in list_evaluations(db_session, user.id, idle=False)} == {"DONE", "PARTIAL"}
+
+
+def test_pages_neither_repeat_nor_skip_one_instant(db_session: Session, make_user):
+    user = make_user()
+    instants = [NOW, NOW, NOW, NOW - timedelta(hours=1), NOW - timedelta(hours=2)]
+    for at in instants:
+        start_evaluation(db_session, user.id, started_at=at)
+    everything = [e.id for e in list_evaluations(db_session, user.id)]
+
+    seen: list[uuid.UUID] = []
+    before = None
+    while True:
+        page = list_evaluations(db_session, user.id, limit=2, before=before)
+        if not page:
+            break
+        seen += [e.id for e in page]
+        before = page[-1].id
+
+    assert seen == everything
+    assert len(set(seen)) == 5
+
+
+def test_a_cursor_that_is_not_this_users_raises(db_session: Session, make_user):
+    alice, bob = make_user(email="a@example.test"), make_user(email="b@example.test")
+    theirs = start_evaluation(db_session, alice.id, started_at=NOW)
+
+    for cursor in (uuid.uuid4(), theirs.id):
+        with pytest.raises(LookupError):
+            list_evaluations(db_session, bob.id, before=cursor)

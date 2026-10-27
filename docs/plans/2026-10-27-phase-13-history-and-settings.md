@@ -92,8 +92,8 @@ Facts that shape the screens:
 - **`log_messages`** is one string with one message per line, or `null`.
 - **Sessions are deleted after 90 days** (`sessions_retention`). Orders are never deleted.
 - **A paused user is never chosen by the scheduler.** Manual operations still work.
-  After a resume, a run whose time passed during the pause happens once, on the next
-  tick (platform spec §10.2).
+  A resume moves both next runs to the first slot after now, and nothing missed while
+  paused runs (platform spec §10.2).
 
 ## Decisions this plan takes
 
@@ -490,8 +490,8 @@ export function useSignOut(): { signOut: () => Promise<void>; pending: boolean; 
   no key: "No key is saved. CoinPilot cannot trade until you save one.", and `KeyForm`
   is open.
 - **Pause.** A switch, "Pause everything", with the sentence "While paused, nothing runs
-  on schedule. Invest now and Rebalance now still work. On resume, a run whose time
-  passed runs once." Each change sends `PATCH /api/config` `{paused}`.
+  on schedule. Invest now and Rebalance now still work. On resume, the next runs are
+  scheduled from then: nothing missed while paused runs." Each change sends `PATCH /api/config` `{paused}`.
 - **Home**, when `paused` is true, shows "Automation is paused." above the account value,
   with a link "Resume in Settings" to `/settings`.
 
@@ -652,8 +652,9 @@ test("sign out lands on the sign-in page", ...)
 
 ## What you verify after the deploy
 
-The migration only adds a column, so a rollback to phase 12's image still works against
-the migrated database.
+The migration only adds columns: `session_id`, and `seq`, an identity that records the
+order the attempts were written in. Phase 12's image writes neither, and the identity fills
+`seq` for it, so a rollback to phase 12's image still works against the migrated database.
 
 1. Deploy. Open History on the phone. Only runs that did something, or failed, are
    listed; "Load more" goes back further. The `sessions` table still holds every run.
@@ -661,7 +662,8 @@ the migrated database.
    run from before the deploy shows "No orders are linked to this run.": its orders have no session.
 3. In Settings, change the invest cadence. "Next invest" moves to the new date.
    `GET /api/config` in `/api/docs` agrees.
-4. Pause. Home says so, and no scheduled run appears in History while paused. Resume.
+4. Pause. Home says so, and no scheduled run appears in History while paused. Resume:
+   the next runs in Settings are after now, and nothing missed runs.
 5. Replace the key with the same key: it is accepted and the status date changes. Do
    not delete it unless you mean to.
 6. Sign out, sign in again, and land on Home.

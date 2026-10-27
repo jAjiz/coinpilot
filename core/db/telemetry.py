@@ -10,12 +10,13 @@ import uuid
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, tuple_
 from sqlalchemy.orm import Session
 
 from core.db.models import EvaluationSession, PortfolioSnapshot
 
 RUNNING = "RUNNING"
+NOTHING_TO_DO = "NOTHING_TO_DO"
 
 
 def record_snapshot(
@@ -160,13 +161,35 @@ def finish_evaluation(
     return record
 
 
-def list_evaluations(session: Session, user_id: uuid.UUID, limit: int = 50) -> list[EvaluationSession]:
-    stmt = (
-        select(EvaluationSession)
-        .where(EvaluationSession.user_id == user_id)
-        .order_by(EvaluationSession.started_at.desc())
-        .limit(limit)
-    )
+def list_evaluations(
+    session: Session,
+    user_id: uuid.UUID,
+    limit: int = 50,
+    *,
+    idle: bool = True,
+    before: uuid.UUID | None = None,
+) -> list[EvaluationSession]:
+    """A user's evaluations, newest first, ordered by (started_at, id) so a page never splits an instant.
+
+    `idle=False` drops the runs that found nothing to do. `before` is the id of the last row
+    of the previous page; the rows returned are strictly after it in this order. Raises
+    LookupError when `before` is not one of this user's sessions.
+    """
+    stmt = select(EvaluationSession).where(EvaluationSession.user_id == user_id)
+    if not idle:
+        stmt = stmt.where(EvaluationSession.status != NOTHING_TO_DO)
+    if before is not None:
+        cursor = session.execute(
+            select(EvaluationSession.started_at, EvaluationSession.id).where(
+                EvaluationSession.id == before, EvaluationSession.user_id == user_id
+            )
+        ).one_or_none()
+        if cursor is None:
+            raise LookupError(before)
+        stmt = stmt.where(
+            tuple_(EvaluationSession.started_at, EvaluationSession.id) < tuple_(cursor.started_at, cursor.id)
+        )
+    stmt = stmt.order_by(EvaluationSession.started_at.desc(), EvaluationSession.id.desc()).limit(limit)
     return list(session.execute(stmt).scalars())
 
 

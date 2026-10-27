@@ -8,11 +8,17 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useOnline } from "@/features/shell/useOnline";
 import {
+  anchorFromInput,
+  anchorInput,
   cadencePatch,
+  checkCustom,
   investFields,
   isUsableDate,
   localDate,
   rebalanceFields,
+  sameFields,
+  type CadenceFields,
+  type CustomErrors,
   type CadenceForm,
   type InvestChoice,
   type RebalanceChoice,
@@ -39,6 +45,8 @@ const INVALID_DRIFT =
 const INVALID_MINIMUM = "Enter an amount of 0 or more, with up to one decimal.";
 const NO_DATE = "Choose a start date.";
 
+const NO_CUSTOM: CustomErrors = { days: null, months: null, anchor: null };
+
 const SELECT_CLASS =
   "h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-base md:text-sm";
 
@@ -52,14 +60,101 @@ function investHint(date: string, choice: InvestChoice): string | null {
   return null;
 }
 
+// Days and months are read from the text: "1.5" or "" is not a whole number,
+// so it becomes NaN and checkCustom refuses it.
+function wholeNumber(text: string): number {
+  return /^\d+$/.test(text) ? Number(text) : NaN;
+}
+
+function CustomFields({
+  fields,
+  errors,
+  onChange,
+}: {
+  fields: CadenceFields;
+  errors: CustomErrors;
+  onChange: (fields: CadenceFields) => void;
+}) {
+  const id = useId();
+  const [days, setDays] = useState(String(fields.interval_days ?? 0));
+  const [months, setMonths] = useState(String(fields.interval_months ?? 0));
+  const [starts, setStarts] = useState(anchorInput(fields.cadence_anchor));
+  return (
+    <>
+      <Label htmlFor={`${id}-mode`}>Repeats</Label>
+      <select
+        id={`${id}-mode`}
+        className={SELECT_CLASS}
+        value={fields.mode}
+        onChange={(event) =>
+          onChange({
+            ...fields,
+            mode: event.target.value as "MIN" | "INTERVAL",
+          })
+        }
+      >
+        <option value="MIN">Every 15 minutes</option>
+        <option value="INTERVAL">On an interval</option>
+      </select>
+      {fields.mode === "INTERVAL" && (
+        <>
+          <Label htmlFor={`${id}-days`}>Days</Label>
+          <Input
+            id={`${id}-days`}
+            inputMode="numeric"
+            value={days}
+            onChange={(event) => {
+              setDays(event.target.value);
+              onChange({
+                ...fields,
+                interval_days: wholeNumber(event.target.value),
+              });
+            }}
+          />
+          <FormError message={errors.days} />
+          <Label htmlFor={`${id}-months`}>Months</Label>
+          <Input
+            id={`${id}-months`}
+            inputMode="numeric"
+            value={months}
+            onChange={(event) => {
+              setMonths(event.target.value);
+              onChange({
+                ...fields,
+                interval_months: wholeNumber(event.target.value),
+              });
+            }}
+          />
+          <FormError message={errors.months} />
+          <Label htmlFor={`${id}-starts`}>Starts</Label>
+          <Input
+            id={`${id}-starts`}
+            type="datetime-local"
+            value={starts}
+            onChange={(event) => {
+              setStarts(event.target.value);
+              onChange({
+                ...fields,
+                cadence_anchor: anchorFromInput(event.target.value),
+              });
+            }}
+          />
+          <FormError message={errors.anchor} />
+        </>
+      )}
+    </>
+  );
+}
+
 function CadencePick<C extends string>({
   label,
   datePrefix,
   options,
   form,
-  hasCustom,
+  initialCustom,
   needsDate,
   error,
+  customErrors,
   hint,
   onChange,
 }: {
@@ -67,9 +162,10 @@ function CadencePick<C extends string>({
   datePrefix: string;
   options: [C, string][];
   form: CadenceForm<C>;
-  hasCustom: boolean;
+  initialCustom: CadenceFields | null;
   needsDate: (choice: C) => boolean;
   error: string | null;
+  customErrors: CustomErrors;
   hint: string | null;
   onChange: (form: CadenceForm<C>) => void;
 }) {
@@ -85,7 +181,7 @@ function CadencePick<C extends string>({
           const value = event.target.value;
           onChange(
             value === "custom"
-              ? { kind: "custom" }
+              ? { kind: "custom", fields: initialCustom! }
               : {
                   kind: "choice",
                   choice: value as C,
@@ -100,12 +196,19 @@ function CadencePick<C extends string>({
             {text}
           </option>
         ))}
-        {hasCustom && <option value="custom">Custom</option>}
+        {initialCustom !== null && <option value="custom">Custom</option>}
       </select>
       {form.kind === "custom" && (
-        <p className="text-sm text-muted-foreground">
-          Set through the API; kept unless you choose another option.
-        </p>
+        <>
+          <p className="text-sm text-muted-foreground">
+            Set through the API. Edit its fields, or choose another option.
+          </p>
+          <CustomFields
+            fields={form.fields}
+            errors={customErrors}
+            onChange={(fields) => onChange({ kind: "custom", fields })}
+          />
+        </>
       )}
       {form.kind === "choice" && needsDate(form.choice) && (
         <>
@@ -195,13 +298,32 @@ type Errors = {
   rebalanceDate: string | null;
   drift: string | null;
   minimum: string | null;
+  investCustom: CustomErrors;
+  rebalanceCustom: CustomErrors;
 };
 const NO_ERRORS: Errors = {
   investDate: null,
   rebalanceDate: null,
   drift: null,
   minimum: null,
+  investCustom: NO_CUSTOM,
+  rebalanceCustom: NO_CUSTOM,
 };
+
+function cadenceBody<C extends string>(
+  prefix: "invest" | "rebalance",
+  form: CadenceForm<C>,
+  initial: CadenceForm<C>,
+  fieldsOf: (
+    form: Extract<CadenceForm<C>, { kind: "choice" }>,
+  ) => CadenceFields,
+) {
+  if (form.kind === "choice") return cadencePatch(prefix, fieldsOf(form));
+  if (initial.kind === "custom" && sameFields(form.fields, initial.fields)) {
+    return {};
+  }
+  return cadencePatch(prefix, form.fields);
+}
 
 export function AutomationForm({
   config,
@@ -218,8 +340,10 @@ export function AutomationForm({
   const [failure, setFailure] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   // "Custom" stays an option for as long as the form was opened with one.
-  const customInvest = initial.invest.kind === "custom";
-  const customRebalance = initial.rebalance.kind === "custom";
+  const customInvest =
+    initial.invest.kind === "custom" ? initial.invest.fields : null;
+  const customRebalance =
+    initial.rebalance.kind === "custom" ? initial.rebalance.fields : null;
 
   const set = (patch: Partial<AutomationValues>) =>
     setValues((current) => ({ ...current, ...patch }));
@@ -242,21 +366,30 @@ export function AutomationForm({
           : null,
       drift: drift === null || compare(drift, "100") > 0 ? INVALID_DRIFT : null,
       minimum: minimum === null ? INVALID_MINIMUM : null,
+      investCustom:
+        invest.kind === "custom" ? checkCustom(invest.fields) : NO_CUSTOM,
+      rebalanceCustom:
+        rebalance.kind === "custom" ? checkCustom(rebalance.fields) : NO_CUSTOM,
     };
     setErrors(found);
-    if (Object.values(found).some((error) => error !== null)) return;
+    const flat = [
+      found.investDate,
+      found.rebalanceDate,
+      found.drift,
+      found.minimum,
+      ...Object.values(found.investCustom),
+      ...Object.values(found.rebalanceCustom),
+    ];
+    if (flat.some((error) => error !== null)) return;
 
-    // A custom cadence the user left alone is not sent.
+    // A custom cadence is sent only when one of its fields changed.
     const body = {
-      ...(invest.kind === "choice"
-        ? cadencePatch("invest", investFields(invest.choice, invest.date))
-        : {}),
-      ...(rebalance.kind === "choice"
-        ? cadencePatch(
-            "rebalance",
-            rebalanceFields(rebalance.choice, rebalance.date),
-          )
-        : {}),
+      ...cadenceBody("invest", invest, initial.invest, (form) =>
+        investFields(form.choice, form.date),
+      ),
+      ...cadenceBody("rebalance", rebalance, initial.rebalance, (form) =>
+        rebalanceFields(form.choice, form.date),
+      ),
       invest_cash_enabled: values.invest_cash_enabled,
       cash_rebalance_enabled: values.cash_rebalance_enabled,
       auto_rebalance_enabled: values.auto_rebalance_enabled,
@@ -287,9 +420,10 @@ export function AutomationForm({
         datePrefix="Invest"
         options={INVEST_OPTIONS}
         form={values.invest}
-        hasCustom={customInvest}
+        initialCustom={customInvest}
         needsDate={(choice) => choice !== "asap"}
         error={errors.investDate}
+        customErrors={errors.investCustom}
         hint={
           values.invest.kind === "choice"
             ? investHint(values.invest.date, values.invest.choice)
@@ -302,9 +436,10 @@ export function AutomationForm({
         datePrefix="Rebalance"
         options={REBALANCE_OPTIONS}
         form={values.rebalance}
-        hasCustom={customRebalance}
+        initialCustom={customRebalance}
         needsDate={() => true}
         error={errors.rebalanceDate}
+        customErrors={errors.rebalanceCustom}
         hint={null}
         onChange={(rebalance) => set({ rebalance })}
       />

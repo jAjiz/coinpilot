@@ -56,11 +56,18 @@ def current(context: ExecutionContext, user_id: uuid.UUID) -> ProposalState | No
         return _state(db.get_live_proposal(session, user_id))
 
 
-def withdraw(context: ExecutionContext, user_id: uuid.UUID) -> bool:
-    """False when there was no live proposal. An executed one is not withdrawn."""
+def withdraw(context: ExecutionContext, user_id: uuid.UUID, version: int) -> bool:
+    """False when there was no live proposal. An executed one is not withdrawn.
+
+    Raises `StaleVersion` when the live proposal is another version than the one read.
+    The check and the withdrawal share one transaction, with the slot locked.
+    """
     with context.sessions() as session:
-        if db.get_live_proposal(session, user_id) is None:
+        slot = db.get_proposal(session, user_id, for_update=True)
+        if slot is None or slot.status != ProposalStatus.LIVE:
             return False
+        if slot.version != version:
+            raise StaleVersion(_state(slot))
         return db.withdraw(session, user_id)
 
 

@@ -28,3 +28,28 @@ export async function mockApi(page: Page, replies: Replies) {
   });
   return calls;
 }
+
+type Cadence = Record<string, unknown>;
+
+// The first run after now: the anchor, stepped by the interval until it is in
+// the future, as the platform reschedules a changed cadence. A MIN cadence
+// keeps the time it had (the unit tests' fake platform does the same).
+export function nextRun(
+  config: Cadence,
+  prefix: "invest" | "rebalance",
+  current: string | null,
+): string | null {
+  const anchor = config[`${prefix}_cadence_anchor`];
+  if (config[`${prefix}_cadence_mode`] !== "INTERVAL" || !anchor) {
+    return current;
+  }
+  const days = Number(config[`${prefix}_interval_days`] ?? 0);
+  const months = Number(config[`${prefix}_interval_months`] ?? 0);
+  if (days === 0 && months === 0) return current;
+  const at = new Date(String(anchor));
+  while (at.getTime() <= Date.now()) {
+    at.setUTCDate(at.getUTCDate() + days);
+    at.setUTCMonth(at.getUTCMonth() + months);
+  }
+  return at.toISOString();
+}

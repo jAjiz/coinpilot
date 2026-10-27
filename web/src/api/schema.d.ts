@@ -333,7 +333,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Sessions */
+        /**
+         * Sessions
+         * @description The runs that affected the user, newest first. Runs that found nothing to do stay stored, unlisted.
+         */
         get: operations["sessions_api_sessions_get"];
         put?: never;
         post?: never;
@@ -483,6 +486,11 @@ export interface components {
         /** EvaluationOut */
         EvaluationOut: {
             /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
              * Started At
              * Format: date-time
              */
@@ -611,6 +619,8 @@ export interface components {
         OrderOut: {
             /** Cl Ord Id */
             cl_ord_id: string;
+            /** Session Id */
+            session_id: string | null;
             /** Txid */
             txid: string | null;
             /** Pair */
@@ -1252,7 +1262,9 @@ export interface operations {
     };
     withdraw_proposal_api_proposal_delete: {
         parameters: {
-            query?: never;
+            query: {
+                version: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1265,6 +1277,15 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };
@@ -1305,6 +1326,7 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
+                session?: string | null;
             };
             header?: never;
             path?: never;
@@ -1336,6 +1358,7 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
+                before?: string | null;
             };
             header?: never;
             path?: never;

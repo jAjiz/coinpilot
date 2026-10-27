@@ -431,3 +431,14 @@ def test_an_investment_by_hand_needs_no_setting(app_context, fake_kraken, ready)
 
     assert result.status is EvaluationStatus.DONE
     assert _sent(fake_kraken) != []
+
+
+def test_an_invest_records_its_session_on_each_order(app_context, db_session, ready):
+    user = ready()
+
+    invest(app_context, user.id)
+
+    (evaluation,) = list_evaluations(db_session, user.id)
+    orders = list_orders(db_session, user.id)
+    assert len(orders) == 2
+    assert {order.session_id for order in orders} == {evaluation.id}
