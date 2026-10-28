@@ -21,6 +21,8 @@ export function accountTotals(portfolio: Portfolio): Totals {
 export type AllocationRow = {
   kind: "asset" | "cash";
   asset: string;
+  amount: string | null;
+  value: string | null;
   weight: string | null;
   target: string | null;
   drift: string | null;
@@ -54,6 +56,8 @@ export function allocationRows(
       return {
         kind: "asset",
         asset: h.asset,
+        amount: h.amount,
+        value: h.value,
         weight: h.weight_pct,
         target: h.target_pct,
         drift: d,
@@ -63,6 +67,8 @@ export function allocationRows(
   const cash: AllocationRow = {
     kind: "cash",
     asset: "Cash",
+    amount: null,
+    value: portfolio.cash,
     weight: portfolio.cash_weight_pct,
     target: portfolio.cash_target_pct,
     drift: driftOf(portfolio.cash_weight_pct, portfolio.cash_target_pct),

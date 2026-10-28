@@ -177,15 +177,19 @@ test("a new user goes from sign-in to Home through the four steps", async ({
 
   await expect(page).toHaveURL(/\/$/);
   await expect(page.getByRole("heading", { name: "Home" })).toBeVisible();
-  expect(calls.filter((call) => !call.startsWith("GET "))).toEqual([
-    "POST /api/credentials",
-    "PATCH /api/config",
-    "POST /api/portfolio/refresh",
-    "PUT /api/assets/BTC",
-    "PUT /api/assets/ETH",
-    "PATCH /api/config",
-    "PATCH /api/config",
-  ]);
+  // Home reads Kraken once on opening, after the wizard's own read.
+  await expect
+    .poll(() => calls.filter((call) => !call.startsWith("GET ")))
+    .toEqual([
+      "POST /api/credentials",
+      "PATCH /api/config",
+      "POST /api/portfolio/refresh",
+      "PUT /api/assets/BTC",
+      "PUT /api/assets/ETH",
+      "PATCH /api/config",
+      "PATCH /api/config",
+      "POST /api/portfolio/refresh",
+    ]);
 });
 
 test("a reload in the middle resumes at the same step", async ({ page }) => {

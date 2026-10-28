@@ -4,6 +4,7 @@ import { describeError } from "@/api/client";
 import { configKey, useConfig } from "@/api/queries";
 import { FormError } from "@/components/FormError";
 import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AutomationForm } from "@/features/onboarding/AutomationForm";
 import { settingsValues } from "@/features/onboarding/automationValues";
@@ -35,46 +36,41 @@ export function AutomationBlock() {
   return (
     <section className="flex flex-col items-start gap-3">
       <h2 className="text-lg font-semibold">Automation</h2>
-      {editing ? (
-        <>
-          <AutomationForm
-            config={data}
-            initial={settingsValues(data, today)}
-            onSaved={async () => {
-              // The refetch carries the moved next runs.
-              await client.invalidateQueries({ queryKey: configKey });
-              setEditing(false);
-            }}
-          />
-          <Button variant="outline" onClick={() => setEditing(false)}>
-            Cancel
-          </Button>
-        </>
-      ) : (
-        <>
-          {summarize({
-            fiat: data.fiat,
-            invest: readInvest(cadenceOf(data, "invest"), today),
-            rebalance: readRebalance(cadenceOf(data, "rebalance")),
-            invest_cash_enabled: data.invest_cash_enabled,
-            cash_rebalance_enabled: data.cash_rebalance_enabled,
-            auto_rebalance_enabled: data.auto_rebalance_enabled,
-            min_drift_pct: data.min_drift_pct,
-            min_order_fiat: data.min_order_fiat,
-          }).map((sentence) => (
-            <p key={sentence}>{sentence}</p>
-          ))}
-          {data.next_invest_at !== null && (
-            <p>Next invest: {formatRun(data.next_invest_at)}</p>
-          )}
-          {data.next_rebalance_at !== null && (
-            <p>Next rebalance: {formatRun(data.next_rebalance_at)}</p>
-          )}
-          <Button variant="outline" onClick={() => setEditing(true)}>
-            Edit automation
-          </Button>
-        </>
+      {summarize({
+        fiat: data.fiat,
+        invest: readInvest(cadenceOf(data, "invest"), today),
+        rebalance: readRebalance(cadenceOf(data, "rebalance")),
+        invest_cash_enabled: data.invest_cash_enabled,
+        cash_rebalance_enabled: data.cash_rebalance_enabled,
+        auto_rebalance_enabled: data.auto_rebalance_enabled,
+        min_drift_pct: data.min_drift_pct,
+        min_order_fiat: data.min_order_fiat,
+      }).map((sentence) => (
+        <p key={sentence}>{sentence}</p>
+      ))}
+      {data.next_invest_at !== null && (
+        <p>Next invest: {formatRun(data.next_invest_at)}</p>
       )}
+      {data.next_rebalance_at !== null && (
+        <p>Next rebalance: {formatRun(data.next_rebalance_at)}</p>
+      )}
+      <Button variant="outline" onClick={() => setEditing(true)}>
+        Edit automation
+      </Button>
+      <Dialog open={editing} onOpenChange={setEditing} title="Edit automation">
+        <AutomationForm
+          config={data}
+          initial={settingsValues(data, today)}
+          onSaved={async () => {
+            // The refetch carries the moved next runs.
+            await client.invalidateQueries({ queryKey: configKey });
+            setEditing(false);
+          }}
+        />
+        <Button variant="outline" onClick={() => setEditing(false)}>
+          Cancel
+        </Button>
+      </Dialog>
     </section>
   );
 }
