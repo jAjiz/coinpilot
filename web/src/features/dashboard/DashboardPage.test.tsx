@@ -71,7 +71,13 @@ function setOnline(online: boolean) {
   });
 }
 
-afterEach(() => setOnline(true));
+afterEach(() => {
+  setOnline(true);
+  Object.defineProperty(document, "visibilityState", {
+    value: "visible",
+    configurable: true,
+  });
+});
 
 test("the account's value, split into managed and unmanaged", async () => {
   renderAt("/", platform().handlers);
@@ -115,6 +121,29 @@ test("each managed asset and cash have a row with weight, target and drift", asy
   const cash = within(rowOf("Cash"));
   expect(cash.getByText("10 % · target 10 %")).toBeInTheDocument();
   expect(screen.queryByRole("listitem", { name: "XRP" })).toBeNull();
+});
+
+test("each row shows the amount held and its market value", async () => {
+  renderAt(
+    "/",
+    platform({
+      snapshot: snapshot({
+        holdings: [
+          held("BTC", {
+            amount: "0.01230000",
+            value: "325",
+            weight_pct: "32.5",
+            target_pct: "30",
+          }),
+          held("DOT", { amount: "4", value: null, price: null }),
+        ],
+      }),
+    }).handlers,
+  );
+  const btc = within(await screen.findByRole("listitem", { name: "BTC" }));
+  expect(btc.getByText("0.0123 BTC · €325.00")).toBeInTheDocument();
+  expect(within(rowOf("DOT")).getByText("4 DOT")).toBeInTheDocument();
+  expect(within(rowOf("Cash")).getByText("€100.00")).toBeInTheDocument();
 });
 
 test("rows drifted past the threshold are highlighted", async () => {
@@ -193,6 +222,65 @@ test("refresh reads Kraken and shows the new reading", async () => {
   expect(await screen.findByText("€1,000.00")).toBeInTheDocument();
   expect(screen.queryByText("€1,050.00")).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled();
+});
+
+function refreshes(fake: { requests: { method: string; path: string }[] }) {
+  return fake.requests.filter(
+    (r) => r.method === "POST" && r.path === "/api/portfolio/refresh",
+  ).length;
+}
+
+function setVisibility(state: "visible" | "hidden") {
+  Object.defineProperty(document, "visibilityState", {
+    value: state,
+    configurable: true,
+  });
+  act(() => {
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+}
+
+test("opening Home reads Kraken once per load", async () => {
+  const fake = platform({
+    assets: [{ asset: "BTC", pair: "BTC/EUR", target_pct: "30" }],
+    portfolio: { cash: "700", holdings: [held("BTC", { value: "300" })] },
+  });
+  const router = renderAt("/", fake.handlers, createQueryClient(), {
+    readOnOpen: true,
+  });
+  expect(await screen.findByText("€1,000.00")).toBeInTheDocument();
+  expect(refreshes(fake)).toBe(1);
+  await act(() => router.navigate("/history"));
+  await act(() => router.navigate("/"));
+  await screen.findByText("€1,000.00");
+  expect(refreshes(fake)).toBe(1);
+});
+
+test("coming back to the foreground keeps a recent reading", async () => {
+  const fake = platform({
+    snapshot: snapshot({ as_of: new Date().toISOString() }),
+  });
+  renderAt("/", fake.handlers);
+  await screen.findByText("€1,050.00");
+  setVisibility("hidden");
+  setVisibility("visible");
+  expect(refreshes(fake)).toBe(0);
+});
+
+test("coming back to the foreground reads a stale reading again", async () => {
+  const fake = platform({
+    snapshot: snapshot({
+      as_of: new Date(Date.now() - 6 * 60_000).toISOString(),
+    }),
+    assets: [{ asset: "BTC", pair: "BTC/EUR", target_pct: "30" }],
+    portfolio: { cash: "700", holdings: [held("BTC", { value: "300" })] },
+  });
+  renderAt("/", fake.handlers);
+  await screen.findByText("€1,050.00");
+  setVisibility("hidden");
+  setVisibility("visible");
+  expect(await screen.findByText("€1,000.00")).toBeInTheDocument();
+  expect(refreshes(fake)).toBe(1);
 });
 
 test("refreshing says Kraken is being read", async () => {

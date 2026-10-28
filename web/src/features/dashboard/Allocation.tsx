@@ -1,6 +1,11 @@
 import { useConfig, usePortfolio } from "@/api/queries";
 import { allocationRows, formatDrift, type AllocationRow } from "@/lib/account";
-import { compare, formatPercent } from "@/lib/decimal";
+import {
+  compare,
+  formatAmount,
+  formatMoney,
+  formatPercent,
+} from "@/lib/decimal";
 import { cn } from "cn";
 
 // A weight outside 0-100 would draw outside the track.
@@ -32,7 +37,19 @@ function Bar({ weight, target }: { weight: string; target: string | null }) {
   );
 }
 
+// "0.0123 BTC · €325.00"; cash is its value alone, and a missing part is left out.
+function holding(row: AllocationRow, fiat: string): string | null {
+  const parts = [
+    ...(row.amount === null
+      ? []
+      : [`${formatAmount(row.amount)} ${row.asset}`]),
+    ...(row.value === null ? [] : [formatMoney(row.value, fiat)]),
+  ];
+  return parts.length === 0 ? null : parts.join(" · ");
+}
+
 function Row({ row, fiat }: { row: AllocationRow; fiat: string }) {
+  const held = holding(row, fiat);
   return (
     <li
       aria-label={row.asset}
@@ -52,6 +69,7 @@ function Row({ row, fiat }: { row: AllocationRow; fiat: string }) {
           </span>
         )}
       </div>
+      {held !== null && <p data-slot="holding">{held}</p>}
       {row.weight === null ? (
         <p className="text-sm text-muted-foreground">
           {row.kind === "cash"

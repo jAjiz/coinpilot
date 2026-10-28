@@ -162,6 +162,8 @@ test("an onboarded user reads the account, requests a rebalance and approves it"
 
   const sent = calls.filter((call) => !call.startsWith("GET "));
   expect(sent).toEqual([
+    // Opening Home reads Kraken.
+    "POST /api/portfolio/refresh",
     "POST /api/rebalance",
     "POST /api/proposal/approve",
     "POST /api/portfolio/refresh",
