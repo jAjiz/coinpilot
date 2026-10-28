@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { afterEach, expect, test, vi } from "vitest";
@@ -23,6 +23,25 @@ function platform(initial: Partial<FakeState> = {}) {
     ...initial,
   });
 }
+
+test("each edit opens in its own window and Cancel closes it", async () => {
+  const user = userEvent.setup();
+  renderAt("/settings", platform().handlers);
+  for (const name of ["Edit targets", "Edit automation"]) {
+    await user.click(await screen.findByRole("button", { name }));
+    const dialog = await screen.findByRole("dialog", { name });
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+  }
+  await user.click(screen.getByRole("button", { name: "Replace key" }));
+  const dialog = await screen.findByRole("dialog", { name: "Replace key" });
+  await user.click(within(dialog).getByRole("button", { name: "Close" }));
+  await waitFor(() =>
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+  );
+});
 
 test("the key is replaced only by one Kraken accepts", async () => {
   const user = userEvent.setup();
