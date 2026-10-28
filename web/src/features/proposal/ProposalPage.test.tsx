@@ -477,7 +477,10 @@ test("a failed refresh after an approval is said", async () => {
   const fake = platform();
   renderAt("/proposal", [
     http.post("/api/portfolio/refresh", () =>
-      HttpResponse.json({ detail: "down" }, { status: 503 }),
+      HttpResponse.json(
+        { detail: "kraken did not return balance; nothing was recorded" },
+        { status: 503 },
+      ),
     ),
     ...fake.handlers,
   ]);
@@ -770,7 +773,10 @@ test("an approval that sent nothing does not show an earlier invest's failed ref
   });
   const router = renderAt("/", [
     http.post("/api/portfolio/refresh", () =>
-      HttpResponse.json({ detail: "down" }, { status: 503 }),
+      HttpResponse.json(
+        { detail: "kraken did not return balance; nothing was recorded" },
+        { status: 503 },
+      ),
     ),
     ...fake.handlers,
   ]);

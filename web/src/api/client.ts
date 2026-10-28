@@ -25,10 +25,19 @@ async function refresh(): Promise<boolean> {
   }
 }
 
+const REFRESH_LOCK = "coinpilot-refresh";
+
+// Other tabs share the cookie, so a Web Lock keeps their refreshes apart too: a
+// tab that waited sends the token the first one rotated in, not the spent one.
+function lockedRefresh(): Promise<boolean> {
+  if (typeof navigator === "undefined" || !navigator.locks) return refresh();
+  return navigator.locks.request(REFRESH_LOCK, refresh);
+}
+
 // Two refreshes with the same token end the sign-in, so exactly one may be in
 // flight: the first request that needs it creates it, the rest await it.
 function sharedRefresh(): Promise<boolean> {
-  refreshInFlight ??= refresh()
+  refreshInFlight ??= lockedRefresh()
     .then((ok) => {
       if (!ok) sessionEndedListeners.forEach((listener) => listener());
       return ok;
@@ -81,8 +90,16 @@ function detailOf(body: unknown, fallback: string): string {
   return fallback;
 }
 
+// The platform's 503s for Kraken all begin with "kraken" and record nothing
+// (spec §7); its other 503, the database being down, keeps its own detail.
+function isKrakenDown(error: ApiError): boolean {
+  return error.status === 503 && error.detail.startsWith("kraken");
+}
+
 export function describeError(error: unknown): string {
-  return error instanceof ApiError ? error.detail : "The connection failed.";
+  if (!(error instanceof ApiError)) return "The connection failed.";
+  if (isKrakenDown(error)) return "Kraken didn't answer; nothing was changed.";
+  return error.detail;
 }
 
 export async function unwrap<T>(
@@ -111,9 +128,6 @@ export function operationError(error: unknown): string {
   if (error instanceof ApiError) {
     if (error.status === 409 && error.detail === BUSY_DETAIL) {
       return "An operation is already running; try again in a moment.";
-    }
-    if (error.status === 503) {
-      return "Kraken didn't answer; nothing was changed.";
     }
   }
   return describeError(error);

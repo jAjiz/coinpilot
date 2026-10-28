@@ -18,6 +18,10 @@ import {
 import { cashTarget, prefillWeights, saveOrder } from "@/lib/portfolio";
 import { StepFailed, StepSkeleton } from "./WizardLayout";
 
+// The client cannot tell an alias from a new asset; only the platform's answer,
+// which names the stored asset, can.
+class SameAsset extends Error {}
+
 const INVALID_TARGET =
   "Enter a percentage from 0 to 100, with up to two decimals.";
 
@@ -224,16 +228,22 @@ function Rows({
       }
       for (const { asset, target } of order.puts) {
         failedAt = asset;
-        await unwrap(
+        const saved = await unwrap(
           api.PUT("/api/assets/{asset}", {
             params: { path: { asset } },
             body: { target_pct: target },
           }),
         );
+        if (saved.asset !== asset && wanted.has(saved.asset)) {
+          throw new SameAsset(
+            `Kraken calls ${asset} ${saved.asset}, which is already in the list. Remove one of them and save again.`,
+          );
+        }
       }
       failedAt = null;
     } catch (error) {
-      const message = describeError(error);
+      const message =
+        error instanceof SameAsset ? error.message : describeError(error);
       if (rows.some((row) => row.asset === failedAt)) {
         change(failedAt!, { error: message });
       } else {

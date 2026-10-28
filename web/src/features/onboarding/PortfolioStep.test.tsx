@@ -255,6 +255,24 @@ test("an added asset Kraken cannot trade shows the reason in its row", async () 
   expect(within(rowOf("BTC")).queryByRole("alert")).not.toBeInTheDocument();
 });
 
+test("an alias of a listed asset is refused when the platform names it", async () => {
+  const user = userEvent.setup();
+  const fake = platform({ aliases: { XXBT: "BTC" } });
+  const router = renderAt("/onboarding/portfolio", fake.handlers);
+  await screen.findByLabelText("Target for BTC");
+  await user.type(screen.getByLabelText("Asset to add"), "xxbt");
+  await user.click(screen.getByRole("button", { name: "Add" }));
+  await user.type(await screen.findByLabelText("Target for XXBT"), "5");
+  const btc = screen.getByLabelText("Target for BTC");
+  await user.clear(btc);
+  await user.type(btc, "20");
+  await user.click(screen.getByRole("button", { name: "Save targets" }));
+  expect(await within(rowOf("XXBT")).findByRole("alert")).toHaveTextContent(
+    "Kraken calls XXBT BTC, which is already in the list.",
+  );
+  expect(router.state.location.pathname).toBe("/onboarding/portfolio");
+});
+
 test("coming back keeps stored targets and deletes an asset switched off", async () => {
   const user = userEvent.setup();
   const fake = platform({
@@ -356,7 +374,7 @@ test("an unreachable Kraken on the read offers a retry", async () => {
     ...fake.handlers,
   ]);
   expect(await screen.findByRole("alert")).toHaveTextContent(
-    "kraken did not return balance; nothing was recorded",
+    "Kraken didn't answer; nothing was changed.",
   );
   await user.click(screen.getByRole("button", { name: "Try again" }));
   await screen.findByLabelText("Target for BTC");
