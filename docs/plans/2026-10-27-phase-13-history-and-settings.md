@@ -667,3 +667,13 @@ order the attempts were written in. Phase 12's image writes neither, and the ide
 5. Replace the key with the same key: it is accepted and the status date changes. Do
    not delete it unless you mean to.
 6. Sign out, sign in again, and land on Home.
+
+## What the manual check showed (2026-10-28)
+
+Production runs `742ce51`.
+
+| Step | Result |
+|---|---|
+| 3. Change the invest cadence | Passed: "Next invest" moved to the new date. |
+
+The other steps were not recorded.

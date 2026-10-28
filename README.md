@@ -1,9 +1,9 @@
 # CoinPilot
 
-> **Status:** project 1 built; going into production. Free cash is invested, and drift is
-> looked for, on each user's cadence; a rebalance is proposed, or executed when the user
-> turned automatic rebalancing on. Everything also runs on request through the REST API.
-> The application that consumes it is project 2.
+> **Status:** runs in production. Free cash is invested, and drift is looked for, on each
+> user's cadence; a rebalance is proposed, or executed when the user turned automatic
+> rebalancing on. Everything also runs on request, from the application in `web/` or
+> through the REST API. Notifications are the next cycle.
 
 A multi-tenant service that keeps a crypto portfolio at the target allocation its owner
 declared, on Kraken. It does two things, and they matter equally:
@@ -33,12 +33,12 @@ Two sections are worth reading before the rest:
 
 ## Scope
 
-This repository is the **platform**: identity, credentials, portfolio state, the
+This repository holds the **platform**: identity, credentials, portfolio state, the
 reconciliation engine, order execution, the scheduler and the REST API. Python, with
 FastAPI, SQLAlchemy and Alembic.
 
-The application that consumes it — a mobile-consultable UI with notifications — is a
-separate project.
+It also holds the **application** that consumes it, in `web/`: a React PWA, served by the
+platform from the same origin, to read the portfolio and act on it from a phone.
 
 ## Running it locally
 
