@@ -4,6 +4,7 @@ import { describeError } from "@/api/client";
 import { invalidateAccount, useAssets, useConfig } from "@/api/queries";
 import { FormError } from "@/components/FormError";
 import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PortfolioForm } from "@/features/onboarding/PortfolioForm";
 import { formatPercent } from "@/lib/decimal";
@@ -41,39 +42,34 @@ export function PortfolioBlock() {
   return (
     <section className="flex flex-col items-start gap-3">
       <h2 className="text-lg font-semibold">Portfolio</h2>
-      {editing ? (
-        <>
-          <PortfolioForm
-            fiat={fiat}
-            onSaved={async () => {
-              await invalidateAccount(client);
-              setEditing(false);
-            }}
-          />
-          <Button variant="outline" onClick={() => setEditing(false)}>
-            Cancel
-          </Button>
-        </>
+      {assets.data.assets.length === 0 ? (
+        <p>No asset is managed yet.</p>
       ) : (
-        <>
-          {assets.data.assets.length === 0 ? (
-            <p>No asset is managed yet.</p>
-          ) : (
-            <ul className="flex flex-col gap-1">
-              {assets.data.assets.map((a) => (
-                <li key={a.asset}>
-                  {a.asset} {formatPercent(a.target_pct)}
-                </li>
-              ))}
-              <li>Cash {formatPercent(assets.data.cash_target_pct)}</li>
-            </ul>
-          )}
-          <p>Currency: {fiat}. It cannot be changed.</p>
-          <Button variant="outline" onClick={() => setEditing(true)}>
-            Edit targets
-          </Button>
-        </>
+        <ul className="flex flex-col gap-1">
+          {assets.data.assets.map((a) => (
+            <li key={a.asset}>
+              {a.asset} {formatPercent(a.target_pct)}
+            </li>
+          ))}
+          <li>Cash {formatPercent(assets.data.cash_target_pct)}</li>
+        </ul>
       )}
+      <p>Currency: {fiat}. It cannot be changed.</p>
+      <Button variant="outline" onClick={() => setEditing(true)}>
+        Edit targets
+      </Button>
+      <Dialog open={editing} onOpenChange={setEditing} title="Edit targets">
+        <PortfolioForm
+          fiat={fiat}
+          onSaved={async () => {
+            await invalidateAccount(client);
+            setEditing(false);
+          }}
+        />
+        <Button variant="outline" onClick={() => setEditing(false)}>
+          Cancel
+        </Button>
+      </Dialog>
     </section>
   );
 }
