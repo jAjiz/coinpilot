@@ -304,7 +304,10 @@ test("a failed refresh after filled orders is said", async () => {
   });
   renderAt("/", [
     http.post("/api/portfolio/refresh", () =>
-      HttpResponse.json({ detail: "down" }, { status: 503 }),
+      HttpResponse.json(
+        { detail: "kraken did not return balance; nothing was recorded" },
+        { status: 503 },
+      ),
     ),
     ...fake.handlers,
   ]);
@@ -380,7 +383,10 @@ test("a failed refresh is not shown under a later outcome", async () => {
   });
   renderAt("/", [
     http.post("/api/portfolio/refresh", () =>
-      HttpResponse.json({ detail: "down" }, { status: 503 }),
+      HttpResponse.json(
+        { detail: "kraken did not return balance; nothing was recorded" },
+        { status: 503 },
+      ),
     ),
     ...fake.handlers,
   ]);

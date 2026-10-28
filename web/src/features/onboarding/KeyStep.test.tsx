@@ -197,7 +197,7 @@ test("a key Kraken does not know is refused", async () => {
   );
 });
 
-test("an unreachable Kraken shows the platform's message", async () => {
+test("an unreachable Kraken says nothing was changed", async () => {
   const user = userEvent.setup();
   renderAt(
     "/onboarding/key",
@@ -208,7 +208,7 @@ test("an unreachable Kraken shows the platform's message", async () => {
   await fillKey(user);
   await user.click(screen.getByRole("button", { name: "Verify & save" }));
   expect(await screen.findByRole("alert")).toHaveTextContent(
-    "kraken could not be reached; the key was not stored",
+    "Kraken didn't answer; nothing was changed.",
   );
 });
 

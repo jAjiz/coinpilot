@@ -18,6 +18,7 @@ export type FakeState = {
   assets: { asset: string; pair: string; target_pct: string }[];
   portfolio: { cash: string; holdings: HoldingOut[] }; // what a refresh returns
   untradable: string[]; // PUT -> 422 "kraken has no tradable {X}/{fiat} pair"
+  aliases: Record<string, string>; // PUT stores an alias under its short name, as Kraken
   keyReply: { status: number; body: unknown }; // POST /api/credentials
   snapshot: Portfolio | null; // GET /api/portfolio; null -> 404
   proposal: Proposal | null; // GET /api/proposal; null -> 404
@@ -43,6 +44,7 @@ const DEFAULTS: FakeState = {
   assets: [],
   portfolio: { cash: "0", holdings: [] },
   untradable: [],
+  aliases: {},
   keyReply: {
     status: 201,
     body: {
@@ -318,7 +320,7 @@ export function fakePlatform(initial: Partial<FakeState> = {}): {
     ),
     http.put("/api/assets/:asset", async ({ request, params }) => {
       const body = (await record(request)) as { target_pct: string | number };
-      const asset = String(params.asset);
+      const asset = state.aliases[String(params.asset)] ?? String(params.asset);
       const target = String(body.target_pct);
       if (state.config === null) {
         return detail(409, "choose a fiat with PATCH /api/config first");

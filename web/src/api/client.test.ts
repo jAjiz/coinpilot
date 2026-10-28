@@ -4,6 +4,7 @@ import { server } from "@/test/server";
 import {
   ApiError,
   api,
+  describeError,
   onSessionEnded,
   operationError,
   unwrap,
@@ -57,6 +58,25 @@ test("three requests that meet a 401 share one refresh and all succeed", async (
 
   expect(results.map((r) => r.response.status)).toEqual([200, 200, 200]);
   expect(refreshCalls).toBe(1);
+});
+
+test("the refresh holds a Web Lock that other tabs wait on", async () => {
+  const request = vi.fn((_name: string, callback: () => Promise<boolean>) =>
+    callback(),
+  );
+  vi.stubGlobal("navigator", { ...navigator, locks: { request } });
+  try {
+    server.use(
+      refreshAnswers(200),
+      expiredUntilRefresh("/api/auth/me", { id: 1 }),
+    );
+    const { response } = await api.GET("/api/auth/me");
+    expect(response.status).toBe(200);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request.mock.calls[0][0]).toBe("coinpilot-refresh");
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });
 
 test("a refused refresh ends the session once and returns the 401", async () => {
@@ -206,6 +226,21 @@ test("an unreachable Kraken says nothing was changed", () => {
   expect(
     operationError(new ApiError(503, "kraken could not be read", null)),
   ).toBe("Kraken didn't answer; nothing was changed.");
+  expect(
+    describeError(
+      new ApiError(
+        503,
+        "kraken could not be reached; the key was not stored",
+        null,
+      ),
+    ),
+  ).toBe("Kraken didn't answer; nothing was changed.");
+});
+
+test("a database that is down keeps the platform's message", () => {
+  const detail =
+    "the database cannot be reached right now; try again in a moment";
+  expect(describeError(new ApiError(503, detail, null))).toBe(detail);
 });
 
 test("a failed connection is told as such", () => {
