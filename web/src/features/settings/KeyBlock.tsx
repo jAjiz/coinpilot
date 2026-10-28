@@ -4,6 +4,7 @@ import { api, describeError, unwrap } from "@/api/client";
 import { credentialStatusKey, useCredentialStatus } from "@/api/queries";
 import { FormError } from "@/components/FormError";
 import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   KeyAcceptedNotes,
@@ -65,7 +66,20 @@ export function KeyBlock() {
       <>
         <p>A key is saved{verified ? `, verified on ${verified}` : ""}.</p>
         {accepted && <KeyAcceptedNotes accepted={accepted} />}
-        {replacing ? (
+        <Button
+          variant="outline"
+          onClick={() => {
+            setAccepted(null);
+            setReplacing(true);
+          }}
+        >
+          Replace key
+        </Button>
+        <Dialog
+          open={replacing}
+          onOpenChange={setReplacing}
+          title="Replace key"
+        >
           <KeyForm
             onStart={() => setAccepted(null)}
             onAccepted={(reply) => {
@@ -74,17 +88,7 @@ export function KeyBlock() {
               void client.invalidateQueries({ queryKey: credentialStatusKey });
             }}
           />
-        ) : (
-          <Button
-            variant="outline"
-            onClick={() => {
-              setAccepted(null);
-              setReplacing(true);
-            }}
-          >
-            Replace key
-          </Button>
-        )}
+        </Dialog>
         {confirming ? (
           <>
             <p>
