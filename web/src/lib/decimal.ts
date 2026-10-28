@@ -37,6 +37,11 @@ export function formatMoney(value: string, fiat: string): string {
   return format.format(value as unknown as number);
 }
 
+// Every digit Kraken gave, without the trailing zeros of its fixed places.
+export function formatAmount(value: string): string {
+  return canonical(Big(value));
+}
+
 export function formatPercent(value: string): string {
   return `${canonical(Big(value))} %`;
 }
