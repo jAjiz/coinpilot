@@ -90,6 +90,16 @@ export function useSessionOrders(sessionId: string, enabled: boolean) {
   });
 }
 
+// The first Home of each load reads Kraken, as Refresh does. One query client
+// lives as long as the load, so it records that the read was taken.
+const openReads = new WeakSet<QueryClient>();
+
+export function claimOpenRead(client: QueryClient): boolean {
+  if (openReads.has(client)) return false;
+  openReads.add(client);
+  return true;
+}
+
 export function useRefreshPortfolio() {
   const client = useQueryClient();
   return useMutation({
