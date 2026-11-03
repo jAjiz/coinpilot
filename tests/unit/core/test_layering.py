@@ -25,7 +25,7 @@ EXECUTOR = ROOT / "core" / "execution.py"
 
 
 def test_only_the_executor_places_an_order():
-    """Phase 5 adds the order path, in one module. A second caller of `add_order` would be
+    """The order path lives in one module. A second caller of `add_order` would be
     a second place money leaves from, with its own idea of the unknown-result protocol."""
     offenders = [
         str(path.relative_to(ROOT))

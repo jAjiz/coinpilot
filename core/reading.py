@@ -1,6 +1,6 @@
 """The Kraken reads a portfolio view needs, through clients the caller hands in.
 
-Used by `POST /portfolio/refresh` now and by the scheduler in phase 7. Every read is
+Used by `POST /portfolio/refresh` and, through `core.execution`, by every operation. Every read is
 required: one that fails raises, and nothing is recorded from a partial answer.
 """
 

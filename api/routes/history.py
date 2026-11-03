@@ -1,4 +1,4 @@
-"""What happened: the orders attempted and the evaluations run. Both empty until phase 5."""
+"""What happened: the orders attempted and the evaluations run."""
 
 from __future__ import annotations
 

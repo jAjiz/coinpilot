@@ -21,15 +21,14 @@ and places orders with an API key the user supplies, and that key is **refused u
 lacks withdrawal permission**, so a compromise bounds to "someone can trade" rather than
 "someone can drain".
 
-## Design
+## Documentation
 
-The full design is in
-[`docs/specs/2026-09-17-platform-design.md`](docs/specs/2026-09-17-platform-design.md).
-Two sections are worth reading before the rest:
-
-- **§14 Design choices** — the decisions a reviewer would otherwise question, each with
-  its reason.
-- **§15 Accepted risks** — what was taken on knowingly, and why.
+| Document | What it holds |
+|---|---|
+| [`docs/specs/2026-09-17-platform-design.md`](docs/specs/2026-09-17-platform-design.md) | The platform's design. Read **§14 Design choices** and **§15 Accepted risks** first. |
+| [`docs/specs/2026-10-16-ui-design.md`](docs/specs/2026-10-16-ui-design.md) | The application's design. |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | The phases it was delivered in, and what comes next. |
+| [`docs/operations.md`](docs/operations.md) | Running it in production. |
 
 ## Scope
 
