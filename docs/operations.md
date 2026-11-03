@@ -2,7 +2,7 @@
 
 How to run the platform on a host of your own: requirements, preparing the host, secrets,
 reaching the API, deploy, rollback, master-key rotation, backups, logs. The design behind
-it is the spec's §13 ([`specs/2026-09-17-platform-design.md`](specs/2026-09-17-platform-design.md)).
+it is the spec's §13 ([`specs/platform-design.md`](specs/platform-design.md)).
 
 ## 1. Requirements
 

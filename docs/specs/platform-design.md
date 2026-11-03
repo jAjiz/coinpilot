@@ -28,7 +28,7 @@ and it executes.
 
 **Project 2** is the application: a mobile-consultable UI, configuration screens and
 notifications. It has its own spec,
-[`2026-10-16-ui-design.md`](2026-10-16-ui-design.md); its first cycle is delivered, and
+[`ui-design.md`](ui-design.md); its first cycle is delivered, and
 notifications are the second.
 
 Project 1 itself has no user-facing interface beyond the REST API.
