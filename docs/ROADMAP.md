@@ -6,7 +6,7 @@ their purpose and are no longer kept; each phase's pull request holds what was d
 
 ## Project 1 — the platform
 
-Designed in [`specs/2026-09-17-platform-design.md`](specs/2026-09-17-platform-design.md).
+Designed in [`specs/platform-design.md`](specs/platform-design.md).
 
 | Phase | Deliverable | How it was verified | Status |
 |---|---|---|---|
@@ -26,7 +26,7 @@ each been verified on their own.
 
 ## Project 2 — the application
 
-Designed in [`specs/2026-10-16-ui-design.md`](specs/2026-10-16-ui-design.md).
+Designed in [`specs/ui-design.md`](specs/ui-design.md).
 
 ### Cycle 1
 

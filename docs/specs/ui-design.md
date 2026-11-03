@@ -6,7 +6,7 @@
 
 ## 1. What this is
 
-The application in front of the platform (project 1, [`2026-09-17-platform-design.md`](2026-09-17-platform-design.md)).
+The application in front of the platform (project 1, [`platform-design.md`](platform-design.md)).
 It does three things:
 
 - **Onboarding.** Takes a new user from sign-in to a working configuration: Kraken key,
