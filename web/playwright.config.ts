@@ -1,6 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 
-// Runs against `vite preview` of a build that already exists (`npm run e2e`
+// Runs against `vite preview` of a build that already exists (`pnpm run e2e`
 // builds first). The service worker is blocked so that `page.route` sees every
 // request; every /api request is answered by the tests, none reaches a platform.
 export default defineConfig({
@@ -16,7 +16,7 @@ export default defineConfig({
   },
   projects: [{ name: "pixel-7", use: { ...devices["Pixel 7"] } }],
   webServer: {
-    command: "npm run preview -- --port 4173 --strictPort",
+    command: "pnpm run preview --port 4173 --strictPort",
     url: "http://localhost:4173",
     reuseExistingServer: !process.env.CI,
   },

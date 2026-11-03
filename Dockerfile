@@ -1,9 +1,10 @@
 # The application: built here, served by the platform (spec §4.1).
 FROM node:24-trixie-slim AS web
 WORKDIR /web
-RUN corepack enable
 COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
-RUN pnpm install --frozen-lockfile
+# The pnpm that package.json pins, without Corepack (no longer bundled after Node 24).
+RUN npm install -g "$(node -p 'require("./package.json").packageManager')" \
+    && pnpm install --frozen-lockfile
 COPY web/ ./
 RUN pnpm run build && pnpm run check:build
 

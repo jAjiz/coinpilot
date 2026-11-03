@@ -64,7 +64,7 @@ The React application is in `web/` (Node 24, see `web/.nvmrc`).
 
    ```bash
    cd web
-   corepack enable
+   npm install -g pnpm@11.4.0   # the version in package.json "packageManager"
    pnpm install --frozen-lockfile
    pnpm run dev
    ```
