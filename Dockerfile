@@ -1,10 +1,11 @@
 # The application: built here, served by the platform (spec §4.1).
 FROM node:24-trixie-slim AS web
 WORKDIR /web
-COPY web/package.json web/package-lock.json ./
-RUN npm ci
+RUN corepack enable
+COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile
 COPY web/ ./
-RUN npm run build && npm run check:build
+RUN pnpm run build && pnpm run check:build
 
 # The platform: FastAPI and the scheduler in one process (spec §4.1).
 # The same Python as CI and the venv: one version, not a range (spec §14).

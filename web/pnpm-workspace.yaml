@@ -1,0 +1,6 @@
+packages: []
+
+# openapi-typescript declares a TypeScript 5 peer; the app builds on 6.
+peerDependencyRules:
+  allowedVersions:
+    openapi-typescript>typescript: "6"

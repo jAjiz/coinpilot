@@ -64,8 +64,9 @@ The React application is in `web/` (Node 24, see `web/.nvmrc`).
 
    ```bash
    cd web
-   npm ci
-   npm run dev
+   corepack enable
+   pnpm install --frozen-lockfile
+   pnpm run dev
    ```
 
    Then open `http://localhost:5173`. Vite proxies `/api` to the API on port 8000, so
@@ -76,11 +77,11 @@ The React application is in `web/` (Node 24, see `web/.nvmrc`).
 
    ```bash
    PYTHONPATH=. python scripts/export_openapi.py   # writes web/openapi.json
-   cd web && npm run generate                      # writes web/src/api/schema.d.ts
+   cd web && pnpm run generate                    # writes web/src/api/schema.d.ts
    ```
 
    Two checks refuse a stale copy: a platform test and `check:generated` in CI.
-4. Tests, from `web/`: `npm test` (unit) and `npm run e2e` (Playwright, builds first).
+4. Tests, from `web/`: `pnpm test` (unit) and `pnpm run e2e` (Playwright, builds first).
 
 ## Production
 
