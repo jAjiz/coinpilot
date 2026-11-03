@@ -1,6 +1,6 @@
 # CoinPilot — Platform Design
 
-**Date:** 2026-09-17 · **Status:** approved; phases 1 to 8 implemented · **Scope:** Project 1 of 2
+**Date:** 2026-09-17 · **Status:** implemented (phases 1 to 8); amended by the application spec where it says so · **Scope:** Project 1 of 2
 
 ---
 
@@ -26,11 +26,12 @@ and places orders with an API key the user supplies.
 the reconciliation engine, order execution, the scheduler, and the REST API. It reads
 and it executes.
 
-**Project 2 (later)** is the application: a mobile-consultable UI, configuration
-screens, notifications, and the decision about how the API is exposed to the internet.
+**Project 2** is the application: a mobile-consultable UI, configuration screens and
+notifications. It has its own spec,
+[`2026-10-16-ui-design.md`](2026-10-16-ui-design.md); its first cycle is delivered, and
+notifications are the second.
 
-Project 1 has no user-facing interface beyond the REST API. Approving a rebalance
-during project 1 is an API call.
+Project 1 itself has no user-facing interface beyond the REST API.
 
 ## 3. Product rules
 
@@ -240,7 +241,7 @@ Every table carries `user_id`. There are no singleton rows.
 | `users` | OAuth identity: provider, subject, email, status. UUID primary key, so row counts are not leaked. |
 | `refresh_tokens` | One row per refresh token: SHA-256, family, expiry, used and revoked timestamps. Expired rows are deleted by retention. |
 | `user_credentials` | Encrypted Kraken key and secret, nonce, master-key version, validation timestamp. |
-| `user_settings` | One row per user: `fiat`, `invest_cash_enabled`, `cash_rebalance_enabled`, `auto_rebalance_enabled`, `min_drift_pct`, `min_order_fiat`, both cadences, `next_invest_at`, `next_rebalance_at`, `paused`, `failure_streak`. |
+| `user_settings` | One row per user: `fiat`, `invest_cash_enabled`, `cash_rebalance_enabled`, `auto_rebalance_enabled`, `min_drift_pct`, `min_order_fiat`, both cadences, `next_invest_at`, `next_rebalance_at`, `paused`, `onboarded_at`, `failure_streak`. |
 | `asset_config` | One row per user and asset: resolved pair, `target_pct`. |
 | `orders` | Every order attempted: `cl_ord_id`, txid, reason, status, requested amount, cost, executed volume, price, fee, and Kraken's error code when it refused the order. |
 | `proposal` | The live proposal, at most one per user: version, plan, trigger, status. |
@@ -253,7 +254,7 @@ own minimum alone (§7.3).
 
 `portfolio_snapshots` exists from day one. Without it there is no way to answer how the
 portfolio has performed over time, and the series cannot be reconstructed afterwards. It is
-also what the project 2 application will chart.
+also what a performance chart in the application will read.
 
 `sessions` records **evaluations**, not system ticks. A monthly user produces twelve rows
 a year, not thirty-five thousand. A retention policy is part of the initial schema, not a
@@ -584,7 +585,7 @@ An unresolved order counts only when Kraken did not answer the lookup (§9.2); o
 is merely not listed yet is a wait and does not count, and a refused order is Kraken's
 answer and does not count either. A user without a key yet is skipped without counting.
 The streak is `user_settings.failure_streak`, so a restart does not reset it. The alert
-is a log line until project 2 brings notifications.
+is a log line until notifications arrive (project 2, cycle 2).
 
 Retention runs on the first tick of each UTC day. A retention that fails is logged and
 tried again on the next tick, and the tick goes on to the users due: housekeeping never
@@ -671,7 +672,7 @@ and only then is the old key removed.
 operator's to arrange.
 
 **Logs** stay in Docker, bounded per container. The failure-streak warning is read there
-until project 2 brings notifications.
+until notifications arrive (project 2, cycle 2).
 
 ## 14. Design choices
 
@@ -703,7 +704,8 @@ Non-obvious decisions a reviewer would otherwise question.
   queries to Postgres — with almost no computation, so language throughput is not a
   differentiator; the bottleneck is network latency and the host. Node would hold a smaller
   resident footprint and would pay off if the project 2 application were TypeScript,
-  sharing one API contract across both. It loses on the point that decides here: the
+  sharing one API contract across both. (It is; the contract is shared instead by
+  generating the client from the OpenAPI schema.) It loses on the point that decides here: the
   exchange layer already exists in Python, and its value is concentrated in the subtle
   parts — status normalisation, lost-response resolution, per-key rate limiting.
   Re-deriving those in another language means learning them a second time.
@@ -773,14 +775,12 @@ Non-obvious decisions a reviewer would otherwise question.
   one's own account. To be reviewed before the service is opened to other people.
 - **Nothing watches the service.** Docker restarts a platform that dies, but no uptime
   check or notification tells anyone that it stopped, or that a user's operations keep
-  failing. The log holds both. Project 2 brings notifications.
+  failing. The log holds both. Notifications are project 2, cycle 2.
 
 ## 16. Deferred to project 2
 
-- The application: mobile-consultable UI, configuration screens, notifications.
-- **Serving the application from the API's origin.** How the API is reached is the
-  deployment's choice (§13, §14); whichever it is, the application must be served from
-  the same origin, so its cookies stay first-party.
+- The application and serving it from the API's origin — both delivered in project 2's
+  first cycle (application spec §2.1). Notifications remain, in its second.
 - **Kraken WebSockets.** Technically viable today — v2 has private balance and execution
   channels — and rejected for project 1 for three reasons: a persistent connection must be
   supervised and its characteristic failure is silent non-delivery; a periodic
