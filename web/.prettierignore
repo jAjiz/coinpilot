@@ -5,3 +5,4 @@ openapi.json
 src/components/ui
 playwright-report
 test-results
+pnpm-lock.yaml
