@@ -10,7 +10,7 @@ RUN pnpm run build && pnpm run check:build
 
 # The platform: FastAPI and the scheduler in one process (spec §4.1).
 # The same Python as CI and the venv: one version, not a range (spec §14).
-FROM python:3.14-slim-trixie
+FROM python:3.15-slim-trixie
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
