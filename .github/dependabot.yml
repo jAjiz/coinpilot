@@ -4,23 +4,31 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    assignees:
+      - jAjiz
     open-pull-requests-limit: 5
 
   - package-ecosystem: npm
     directory: /web
     schedule:
       interval: weekly
+    assignees:
+      - jAjiz
     open-pull-requests-limit: 5
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    assignees:
+      - jAjiz
 
   - package-ecosystem: docker
     directory: /
     schedule:
       interval: weekly
+    assignees:
+      - jAjiz
     # Node majors move by hand, LTS to LTS, together with web/.nvmrc.
     ignore:
       - dependency-name: node
